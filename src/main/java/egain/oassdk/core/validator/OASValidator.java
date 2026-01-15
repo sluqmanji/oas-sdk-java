@@ -230,6 +230,11 @@ public class OASValidator {
             Map<String, Object> param = parameters.get(i);
             if (param == null) continue;
 
+            // Skip validation for $ref parameters - they will be validated when resolved
+            if (param.containsKey("$ref")) {
+                continue;
+            }
+
             // Required fields
             if (!param.containsKey("name")) {
                 errors.add("Parameter " + i + " in " + path + " missing required 'name' field");
