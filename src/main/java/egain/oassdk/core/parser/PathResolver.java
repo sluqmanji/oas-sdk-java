@@ -273,10 +273,9 @@ public class PathResolver {
         // Replace backslashes with forward slashes for cross-platform compatibility
         sanitized = sanitized.replace('\\', '/');
 
-        // Remove any ".." sequences that could be used for path traversal
-        // Note: We still allow legitimate relative paths, but validate them in resolveReference
-        sanitized = sanitized.replace("../", "");
-        sanitized = sanitized.replace("..\\", "");
+        // Note: Path traversal protection is handled by validatePathTraversal() method
+        // which ensures resolved paths don't escape the base directory. We don't remove
+        // "../" sequences here to allow legitimate relative paths to work correctly.
 
         return sanitized;
     }
