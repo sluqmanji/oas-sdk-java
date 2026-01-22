@@ -1076,7 +1076,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      */
     private void generateJAXBBeanInterface(String outputDir, String packagePath) throws IOException {
         String content = "package " + packagePath + ".model;\n\n" +
-                "import java.util.List;\n\n" +
+                "import java.util.Set;\n\n" +
                 "/**\n" +
                 " * Interface for JAXB beans with dynamic attribute support.\n" +
                 " * All model classes implementing this interface are JAXB-compatible.\n" +
@@ -1096,9 +1096,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 "    boolean isSetAttribute(String name);\n\n" +
                 "    /**\n" +
                 "     * Get all attribute names.\n" +
-                "     * @return A list of all attribute names\n" +
+                "     * @return A set of all attribute names\n" +
                 "     */\n" +
-                "    List<String> getAttributeNames();\n\n" +
+                "    Set<String> getAttributeNames();\n\n" +
                 "    /**\n" +
                 "     * Set an attribute value by name.\n" +
                 "     * @param name The attribute name\n" +
@@ -1376,6 +1376,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("import java.util.Objects;\n");
         content.append("import java.util.List;\n");
         content.append("import java.util.ArrayList;\n");
+        content.append("import java.util.Set;\n");
+        content.append("import java.util.LinkedHashSet;\n");
         content.append("import java.util.Map;\n");
         content.append("import java.util.HashMap;\n");
         content.append("import javax.xml.datatype.XMLGregorianCalendar;\n\n");
@@ -1589,14 +1591,12 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n\n");
 
         content.append("    @Override\n");
-        content.append("    public List<String> getAttributeNames() {\n");
-        content.append("        List<String> allNames = new ArrayList<>(attributes.keySet());\n");
-        // Add field names to the list
+        content.append("    public Set<String> getAttributeNames() {\n");
+        content.append("        Set<String> allNames = new LinkedHashSet<>(attributes.keySet());\n");
+        // Add field names to the set
         if (!fieldNames.isEmpty()) {
             for (String fieldName : fieldNames) {
-                content.append("        if (!allNames.contains(\"").append(fieldName).append("\")) {\n");
-                content.append("            allNames.add(\"").append(fieldName).append("\");\n");
-                content.append("        }\n");
+                content.append("        allNames.add(\"").append(fieldName).append("\");\n");
             }
         }
         content.append("        return allNames;\n");
