@@ -2,6 +2,7 @@ package egain.oassdk.examples;
 
 import egain.oassdk.OASSDK;
 import egain.oassdk.core.exceptions.OASSDKException;
+import java.util.List;
 
 /**
  * Generate SDK from bundle-openapi 3.yaml
@@ -32,8 +33,17 @@ public class GenerateBundleSDK {
             sdk.generateApplication("java", "jersey", packageName, outputDir);
             System.out.println("   ✓ Application generated successfully");
             
+            // Generate tests
+            System.out.println("\n3. Generating tests...");
+            String testOutputDir = "./generated-code/bundle-sdk-tests";
+            List<String> testTypes = List.of("unit", "integration", "nfr", "postman");
+            System.out.println("   Test types: " + String.join(", ", testTypes));
+            System.out.println("   Output: " + testOutputDir);
+            sdk.generateTests(testTypes, testOutputDir);
+            System.out.println("   ✓ Tests generated successfully");
+            
             // Verify generated files
-            System.out.println("\n3. Verifying generated files...");
+            System.out.println("\n4. Verifying generated files...");
             java.nio.file.Path outputPath = java.nio.file.Paths.get(outputDir);
             if (java.nio.file.Files.exists(outputPath)) {
                 System.out.println("   ✓ Output directory exists: " + outputPath.toAbsolutePath());
@@ -55,8 +65,10 @@ public class GenerateBundleSDK {
             
             System.out.println("\n=== SDK Generation Complete ===");
             System.out.println("Generated SDK location: " + outputPath.toAbsolutePath());
+            System.out.println("Generated Tests location: " + java.nio.file.Paths.get(testOutputDir).toAbsolutePath());
             System.out.println("\nNote: Executor files have been generated in the executor package.");
             System.out.println("      You can now implement the business logic in the TODO sections.");
+            System.out.println("      Tests (unit, integration, NFR, Postman) have been generated.");
             
         } catch (OASSDKException e) {
             System.err.println("\n❌ Error generating SDK: " + e.getMessage());
