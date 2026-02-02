@@ -2055,7 +2055,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     schema.containsKey("anyOf") ||
                     schema.containsKey("enum");
 
-            if (hasStructure || (schema.containsKey("type") && "array".equals(schema.get("type")))) {
+            // Also generate XSD for schemas with $ref (like EditNonIntegratedUser)
+            boolean hasRef = schema.containsKey("$ref");
+
+            if (hasStructure || hasRef || (schema.containsKey("type") && "array".equals(schema.get("type")))) {
                 String xsdContent = generateXSD(schemaName, schema, spec, schemas);
                 writeFile(xsdDir + "/" + schemaName + ".xsd", xsdContent);
             }
@@ -2289,6 +2292,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             Map<String, Object> propertySchema = Util.asStringObjectMap(property.getValue());
             
             xsd.append("            <xs:element");
+            xsd.append(" name=\"").append(propertyName).append("\"");
             
             // Handle minOccurs for required fields
             if (allRequired.contains(propertyName)) {
@@ -2296,8 +2300,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             } else {
                 xsd.append(" minOccurs=\"0\"");
             }
-            
-            xsd.append(" name=\"").append(propertyName).append("\"");
             
             // Handle array types
             if (propertySchema != null && "array".equals(propertySchema.get("type"))) {
@@ -2393,12 +2395,12 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     Map<String, Object> propSchema = Util.asStringObjectMap(prop.getValue());
                     
                     xsd.append("                        <xs:element");
+                    xsd.append(" name=\"").append(propName).append("\"");
                     if (required.contains(propName)) {
                         xsd.append(" minOccurs=\"1\"");
                     } else {
                         xsd.append(" minOccurs=\"0\"");
                     }
-                    xsd.append(" name=\"").append(propName).append("\"");
                     
                     if (propSchema != null && "array".equals(propSchema.get("type"))) {
                         Object itemsObj = propSchema.get("items");
