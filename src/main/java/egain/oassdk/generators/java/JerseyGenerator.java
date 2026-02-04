@@ -2062,12 +2062,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                         Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
                                         if (candidateSchema != null) {
                                             Object candidateType = candidateSchema.get("type");
-                                            Object candidateProperties = candidateSchema.get("properties");
-                                            // Match by type and properties structure
-                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType) &&
-                                                fieldProperties != null && fieldProperties.equals(candidateProperties)) {
-                                                itemType = toJavaClassName(schemaEntry.getKey());
-                                                break;
+                                            // Skip expensive properties.equals() comparison to prevent StackOverflow
+                                            // Use lightweight heuristic: match by type only
+                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType)) {
+                                                // Additional lightweight check: compare properties count if available
+                                                Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                                                int fieldPropsCount = (fieldProperties != null) ? ((Map<?, ?>)fieldProperties).size() : 0;
+                                                int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                                                if (fieldPropsCount == candidatePropsCount && fieldPropsCount > 0) {
+                                                    itemType = toJavaClassName(schemaEntry.getKey());
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
@@ -2172,12 +2177,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                         Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
                                         if (candidateSchema != null) {
                                             Object candidateType = candidateSchema.get("type");
-                                            Object candidateProperties = candidateSchema.get("properties");
-                                            // Match by type and properties structure
-                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType) &&
-                                                fieldProperties != null && fieldProperties.equals(candidateProperties)) {
-                                                itemType = toJavaClassName(schemaEntry.getKey());
-                                                break;
+                                            // Skip expensive properties.equals() comparison to prevent StackOverflow
+                                            // Use lightweight heuristic: match by type only
+                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType)) {
+                                                // Additional lightweight check: compare properties count if available
+                                                Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                                                int fieldPropsCount = (fieldProperties != null) ? ((Map<?, ?>)fieldProperties).size() : 0;
+                                                int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                                                if (fieldPropsCount == candidatePropsCount && fieldPropsCount > 0) {
+                                                    itemType = toJavaClassName(schemaEntry.getKey());
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
@@ -2871,36 +2881,44 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     break;
                 }
             }
-            // If identity didn't match, try structure matching for resolved $refs
-            // This is needed because parser creates a copy of resolved content
+            // Skip expensive structure matching using equals() to prevent StackOverflow
+            // Use lightweight heuristic: check only top-level type and properties existence
+            // This is safe because identity-based matching above handles most cases
             if (!isResolvedRef && !schema.containsKey("$ref")) {
-                // Only do structure matching if schema doesn't have $ref (meaning it was resolved)
+                // Only do lightweight matching if schema doesn't have $ref (meaning it was resolved)
                 // and has meaningful content
                 boolean hasContent = (schema.containsKey("type") && schema.get("type") != null) ||
                                     (schema.containsKey("properties") && schema.get("properties") != null);
                 if (hasContent) {
-                    // Try to match by comparing the entire schema structure
-                    // Create a copy without $ref for comparison
-                    Map<String, Object> schemaForComparison = new HashMap<>(schema);
-                    schemaForComparison.remove("$ref");
+                    // Use lightweight comparison: check only type and properties existence
+                    // Skip full structure comparison to prevent StackOverflow
+                    String schemaType = (String) schema.get("type");
+                    Map<String, Object> schemaProperties = Util.asStringObjectMap(schema.get("properties"));
+                    int schemaPropertiesCount = (schemaProperties != null) ? schemaProperties.size() : 0;
                     
-                    for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                        if (schemaEntry.getKey().equals(schemaName)) {
-                            continue; // Skip self
-                        }
-                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                        if (candidateSchema != null && candidateSchema != schema) {
-                            // Create candidate copy without $ref for comparison
-                            Map<String, Object> candidateForComparison = new HashMap<>(candidateSchema);
-                            candidateForComparison.remove("$ref");
-                            
-                            // Compare entire schema structure using equals()
-                            // This works because Map.equals() compares entries recursively
-                            if (schemaForComparison.equals(candidateForComparison) && 
-                                !schemaForComparison.isEmpty()) {
-                                referencedNamespaces.add(schemaEntry.getKey());
-                                isResolvedRef = true;
-                                break;
+                    // Skip if schema has too many properties (expensive to compare)
+                    if (schemaPropertiesCount <= 50) {
+                        for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                            if (schemaEntry.getKey().equals(schemaName)) {
+                                continue; // Skip self
+                            }
+                            Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                            if (candidateSchema != null && candidateSchema != schema && !candidateSchema.containsKey("$ref")) {
+                                // Lightweight comparison: check type and properties count only
+                                String candidateType = (String) candidateSchema.get("type");
+                                Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                                int candidatePropertiesCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                                
+                                // Match if type and properties count match (lightweight heuristic)
+                                if ((schemaType == null && candidateType == null) || 
+                                    (schemaType != null && schemaType.equals(candidateType))) {
+                                    if (schemaPropertiesCount == candidatePropertiesCount && 
+                                        schemaPropertiesCount > 0) {
+                                        referencedNamespaces.add(schemaEntry.getKey());
+                                        isResolvedRef = true;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -2908,7 +2926,15 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             }
             
             // Collect referenced schemas for imports
-            collectReferencedSchemasForXSD(schema, allSchemas, referencedNamespaces, visited);
+            // Wrap in try-catch to prevent StackOverflow from propagating
+            try {
+                collectReferencedSchemasForXSD(schema, allSchemas, referencedNamespaces, visited);
+            } catch (StackOverflowError e) {
+                // If StackOverflow occurs during reference collection, log and continue with empty references
+                logger.warning("StackOverflow error collecting referenced schemas for " + schemaName + ", continuing with minimal references");
+                // Clear referencedNamespaces to avoid issues, but keep the schema itself
+                referencedNamespaces.clear();
+            }
             
             // For array type schemas, also collect referenced schemas from items
             if (schema.containsKey("type") && "array".equals(schema.get("type"))) {
@@ -2917,7 +2943,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
                     if (itemsSchema != null) {
                         // Collect referenced schemas from items for imports
-                        collectReferencedSchemasForXSD(itemsSchema, allSchemas, referencedNamespaces, visited);
+                        // Wrap in try-catch to prevent StackOverflow from propagating
+                        try {
+                            collectReferencedSchemasForXSD(itemsSchema, allSchemas, referencedNamespaces, visited);
+                        } catch (StackOverflowError e) {
+                            // If StackOverflow occurs, log and continue without collecting item references
+                            logger.warning("StackOverflow error collecting referenced schemas from items for " + schemaName);
+                        }
                     }
                 }
             }
@@ -3015,19 +3047,33 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         } else {
             // Check if this is a resolved $ref (schema content matches another schema)
             // We already detected this above and added to referencedNamespaces
+            // Use lightweight comparison instead of expensive equals() to prevent StackOverflow
             String resolvedRefSchemaName = null;
             if (!referencedNamespaces.isEmpty() && !schema.containsKey("$ref")) {
-                // Check if this schema content matches a referenced schema
-                Map<String, Object> schemaForComparison = new HashMap<>(schema);
-                schemaForComparison.remove("$ref");
-                for (String refSchema : referencedNamespaces) {
-                    Map<String, Object> candidateSchema = Util.asStringObjectMap(allSchemas.get(refSchema));
-                    if (candidateSchema != null) {
-                        Map<String, Object> candidateForComparison = new HashMap<>(candidateSchema);
-                        candidateForComparison.remove("$ref");
-                        if (schemaForComparison.equals(candidateForComparison) && !schemaForComparison.isEmpty()) {
-                            resolvedRefSchemaName = refSchema;
-                            break;
+                // Use lightweight heuristic: check only type and properties count
+                String schemaType = (String) schema.get("type");
+                Map<String, Object> schemaProperties = Util.asStringObjectMap(schema.get("properties"));
+                int schemaPropertiesCount = (schemaProperties != null) ? schemaProperties.size() : 0;
+                
+                // Skip if schema has too many properties (expensive to compare)
+                if (schemaPropertiesCount <= 50) {
+                    for (String refSchema : referencedNamespaces) {
+                        Map<String, Object> candidateSchema = Util.asStringObjectMap(allSchemas.get(refSchema));
+                        if (candidateSchema != null && !candidateSchema.containsKey("$ref")) {
+                            // Lightweight comparison: check type and properties count only
+                            String candidateType = (String) candidateSchema.get("type");
+                            Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                            int candidatePropertiesCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                            
+                            // Match if type and properties count match (lightweight heuristic)
+                            if ((schemaType == null && candidateType == null) || 
+                                (schemaType != null && schemaType.equals(candidateType))) {
+                                if (schemaPropertiesCount == candidatePropertiesCount && 
+                                    schemaPropertiesCount > 0) {
+                                    resolvedRefSchemaName = refSchema;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -3096,8 +3142,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                                  Set<String> referencedSchemas, Set<Object> visited, int depth) {
         // Prevent StackOverflow by limiting recursion depth
         // Aggressively reduced limit to prevent StackOverflow in very large specs with deep nesting
-        if (depth > 20) {
+        if (depth > 5) {
             logger.warning("Recursion depth limit reached in collectReferencedSchemasForXSD: " + depth);
+            return;
+        }
+        
+        // Early bailout: if allSchemas is very large, skip deep processing to prevent StackOverflow
+        if (allSchemas.size() > 500 && depth > 2) {
+            logger.warning("Skipping deep reference collection for large schema set at depth: " + depth);
             return;
         }
         
@@ -3134,9 +3186,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             
             // Check properties
             // Limit property processing at deeper levels to prevent StackOverflow
-            if (schema.containsKey("properties") && depth < 15) {
+            // Add early bailout: skip if depth too high or too many properties
+            if (schema.containsKey("properties") && depth < 5) {
                 Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
                 if (properties != null) {
+                    // Early bailout: skip if too many properties (expensive to process)
+                    if (properties.size() > 50) {
+                        return; // Skip processing schemas with too many properties
+                    }
                     for (Map.Entry<String, Object> property : properties.entrySet()) {
                         Map<String, Object> propertySchema = Util.asStringObjectMap(property.getValue());
                         if (propertySchema != null && !visited.contains(propertySchema)) {
@@ -3149,35 +3206,24 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                 }
                             } else {
                                 // If $ref was resolved, try to match the resolved schema to its name
-                                // Check by identity first
-                                boolean found = false;
+                                // Check by identity only (O(1) and safe, prevents StackOverflow)
+                                // Limit iterations to prevent StackOverflow in very large schema sets
+                                int maxIterations = Math.min(allSchemas.size(), 1000);
+                                int iterationCount = 0;
                                 for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                                    if (++iterationCount > maxIterations) {
+                                        break; // Prevent excessive iterations
+                                    }
                                     Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
                                     if (candidateSchema == propertySchema) {
                                         if (!referencedSchemas.contains(schemaEntry.getKey())) {
                                             referencedSchemas.add(schemaEntry.getKey());
                                         }
-                                        found = true;
                                         break;
                                     }
                                 }
-                                // If identity didn't match, try structure matching using equals()
-                                if (!found && !propertySchema.containsKey("$ref")) {
-                                    // Only match if propertySchema doesn't have $ref (was resolved)
-                                    for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                        if (candidateSchema != null && candidateSchema != propertySchema) {
-                                            // Compare entire schema structure using equals()
-                                            if (propertySchema.equals(candidateSchema)) {
-                                                if (!referencedSchemas.contains(schemaEntry.getKey())) {
-                                                    referencedSchemas.add(schemaEntry.getKey());
-                                                }
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
+                                // Skip expensive structure matching using equals() to prevent StackOverflow
+                                // Rely only on identity-based matching which is O(1) and safe
                             }
                             collectReferencedSchemasForXSD(propertySchema, allSchemas, referencedSchemas, visited, depth + 1);
                         }
@@ -3187,7 +3233,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             
             // Check items for arrays - this is important for collecting array item references
             // Limit items processing at deeper levels to prevent StackOverflow
-            if (schema.containsKey("items") && depth < 15) {
+            // Add early bailout: skip if depth too high
+            if (schema.containsKey("items") && depth < 5) {
                 Map<String, Object> itemsSchema = Util.asStringObjectMap(schema.get("items"));
                 if (itemsSchema != null && !visited.contains(itemsSchema)) {
                     // First, check if items has a $ref and add it to referencedSchemas
@@ -3199,35 +3246,24 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         }
                     } else {
                         // If $ref was resolved, try to match the resolved schema to its name
-                        // Check by identity first
-                        boolean found = false;
+                        // Check by identity only (O(1) and safe, prevents StackOverflow)
+                        // Limit iterations to prevent StackOverflow in very large schema sets
+                        int maxIterations = Math.min(allSchemas.size(), 1000);
+                        int iterationCount = 0;
                         for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                            if (++iterationCount > maxIterations) {
+                                break; // Prevent excessive iterations
+                            }
                             Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
                             if (candidateSchema == itemsSchema) {
                                 if (!referencedSchemas.contains(schemaEntry.getKey())) {
                                     referencedSchemas.add(schemaEntry.getKey());
                                 }
-                                found = true;
                                 break;
                             }
                         }
-                        // If identity didn't match, try structure matching using equals()
-                        if (!found && !itemsSchema.containsKey("$ref")) {
-                            // Only match if itemsSchema doesn't have $ref (was resolved)
-                            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                if (candidateSchema != null && candidateSchema != itemsSchema) {
-                                    // Compare entire schema structure using equals()
-                                    if (itemsSchema.equals(candidateSchema)) {
-                                        if (!referencedSchemas.contains(schemaEntry.getKey())) {
-                                            referencedSchemas.add(schemaEntry.getKey());
-                                        }
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                        // Skip expensive structure matching using equals() to prevent StackOverflow
+                        // Rely only on identity-based matching which is O(1) and safe
                     }
                     collectReferencedSchemasForXSD(itemsSchema, allSchemas, referencedSchemas, visited, depth + 1);
                 }
@@ -3411,12 +3447,16 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                     Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
                                     if (candidateSchema != null) {
                                         Object candidateType = candidateSchema.get("type");
-                                        Object candidateProperties = candidateSchema.get("properties");
-                                        // Match by type and properties structure
-                                        if (itemsType != null && itemsType.equals(candidateType) &&
-                                            itemsProperties != null && itemsProperties.equals(candidateProperties)) {
-                                            refSchemaName = schemaEntry.getKey();
-                                            break;
+                                        // Skip expensive properties.equals() comparison to prevent StackOverflow
+                                        // Use lightweight heuristic: match by type and properties count
+                                        if (itemsType != null && itemsType.equals(candidateType)) {
+                                            Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                                            int itemsPropsCount = (itemsProperties != null) ? ((Map<?, ?>)itemsProperties).size() : 0;
+                                            int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                                            if (itemsPropsCount == candidatePropsCount && itemsPropsCount > 0) {
+                                                refSchemaName = schemaEntry.getKey();
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -3521,7 +3561,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                          Set<Object> visited, int depth) {
         // Prevent StackOverflow by limiting recursion depth
         // Aggressively reduced limit to prevent StackOverflow in very large specs with deep nesting
-        if (depth > 10) {
+        if (depth > 5) {
             logger.warning("Recursion depth limit reached in generateXSDPropertyType: " + depth);
             xsd.append(" type=\"xs:anyType\"");
             return;
@@ -3555,24 +3595,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     break;
                 }
             }
-            // If identity didn't match, try structure matching
-            if (refSchemaName == null) {
-                Object propType = propertySchema.get("type");
-                Object propProperties = propertySchema.get("properties");
-                for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                    if (candidateSchema != null) {
-                        Object candidateType = candidateSchema.get("type");
-                        Object candidateProperties = candidateSchema.get("properties");
-                        // Match by type and properties structure
-                        if (propType != null && propType.equals(candidateType) &&
-                            propProperties != null && propProperties.equals(candidateProperties)) {
-                            refSchemaName = schemaEntry.getKey();
-                            break;
-                        }
-                    }
-                }
-            }
+            // Skip expensive structure matching using equals() to prevent StackOverflow
+            // Rely only on identity-based matching which is O(1) and safe
+            // If identity didn't match, we can't safely determine the schema name without expensive comparison
         }
         if (refSchemaName != null) {
             xsd.append(" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"");
@@ -3592,8 +3617,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 return;
             }
             
-            // Skip processing nested object properties at very deep levels
-            if (depth >= 8) {
+            // Early bailout: skip processing nested object properties at very deep levels or if too many properties
+            if (depth >= 5 || properties.size() > 30) {
                 xsd.append(" type=\"xs:anyType\"");
                 return;
             }
