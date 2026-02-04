@@ -1333,6 +1333,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         if (schemas != null && schemas.containsKey(schemaName)) {
                             Map<String, Object> referencedSchema = Util.asStringObjectMap(schemas.get(schemaName));
                             if (referencedSchema != null) {
+                                // Check if we've already visited this schema to prevent cycles
+                                if (visited.containsKey(referencedSchema)) {
+                                    return; // Already visited, prevent infinite recursion
+                                }
                                 // Mark this schema object as visited to prevent cycles
                                 java.util.Map<Object, Boolean> nestedVisited = new java.util.IdentityHashMap<>(visited);
                                 nestedVisited.put(referencedSchema, Boolean.TRUE);
@@ -1363,10 +1367,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                             String schemaName = schemaEntry.getKey();
                             if (!referencedSchemas.contains(schemaName)) {
                                 referencedSchemas.add(schemaName);
-                                // Collect nested schemas (like items)
-                                java.util.Map<Object, Boolean> nestedVisited = new java.util.IdentityHashMap<>(visited);
-                                nestedVisited.put(schema, Boolean.TRUE);
-                                collectSchemasFromSchemaObject(schema, referencedSchemas, spec, nestedVisited);
+                                // Collect nested schemas (like items) - but don't recurse on the array schema itself
+                                // to prevent StackOverflow
+                                Object itemsObj = schema.get("items");
+                                if (itemsObj != null) {
+                                    java.util.Map<Object, Boolean> nestedVisited = new java.util.IdentityHashMap<>(visited);
+                                    nestedVisited.put(schema, Boolean.TRUE);
+                                    collectSchemasFromSchemaObject(itemsObj, referencedSchemas, spec, nestedVisited);
+                                }
                             }
                             return;
                         }
@@ -1389,10 +1397,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                     String schemaName = schemaEntry.getKey();
                                     if (!referencedSchemas.contains(schemaName)) {
                                         referencedSchemas.add(schemaName);
-                                        // Collect nested schemas
-                                        java.util.Map<Object, Boolean> nestedVisited = new java.util.IdentityHashMap<>(visited);
-                                        nestedVisited.put(schema, Boolean.TRUE);
-                                        collectSchemasFromSchemaObject(schema, referencedSchemas, spec, nestedVisited);
+                                        // Collect nested schemas (like items) - but don't recurse on the array schema itself
+                                        // to prevent StackOverflow
+                                        // Reuse itemsObj from outer scope
+                                        if (itemsObj != null) {
+                                            java.util.Map<Object, Boolean> nestedVisited = new java.util.IdentityHashMap<>(visited);
+                                            nestedVisited.put(schema, Boolean.TRUE);
+                                            collectSchemasFromSchemaObject(itemsObj, referencedSchemas, spec, nestedVisited);
+                                        }
                                     }
                                     return;
                                 }
@@ -1628,18 +1640,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                                                         }
                                                                     }
                                                                 }
-                                                                // If no match found, add all array type schemas as fallback
-                                                                // This ensures array types are generated even if matching fails
-                                                                if (!found) {
-                                                                    for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                                                                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                                                        if (candidateSchema != null && 
-                                                                            candidateSchema.containsKey("type") && 
-                                                                            "array".equals(candidateSchema.get("type"))) {
-                                                                            referencedSchemas.add(schemaEntry.getKey());
-                                                                        }
-                                                                    }
-                                                                }
+                                                                // If no match found, don't add all array schemas as fallback
+                                                                // Only add schemas that are actually referenced in responses
+                                                                // The fallback was causing unreferenced arrays to be generated incorrectly
                                                             }
                                                         }
                                                     }
@@ -2387,6 +2390,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         } else {
             // Collect referenced schemas for imports
             collectReferencedSchemasForXSD(schema, allSchemas, referencedNamespaces, new HashSet<>());
+            
+            // For array type schemas, also collect referenced schemas from items
+            if (schema.containsKey("type") && "array".equals(schema.get("type"))) {
+                Object itemsObj = schema.get("items");
+                if (itemsObj != null) {
+                    Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
+                    if (itemsSchema != null) {
+                        // Collect referenced schemas from items for imports
+                        collectReferencedSchemasForXSD(itemsSchema, allSchemas, referencedNamespaces, new HashSet<>());
+                    }
+                }
+            }
         }
         
         xsd.append("<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"\n");
