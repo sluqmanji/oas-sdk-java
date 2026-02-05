@@ -1364,7 +1364,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 if (!referencedSchemas.contains(schemaName)) {
                     referencedSchemas.add(schemaName);
                     // Then collect nested schemas with proper cycle detection
-                    Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+                    components = Util.asStringObjectMap(spec.get("components"));
                     if (components != null) {
                         Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
                         if (schemas != null && schemas.containsKey(schemaName)) {
@@ -1403,7 +1403,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         // So we need to match by comparing structure - specifically check if it's an array type
         // and if the items structure matches any array schema in components/schemas
         if (!schema.containsKey("$ref") && schema.containsKey("type") && "array".equals(schema.get("type"))) {
-            Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+            components = Util.asStringObjectMap(spec.get("components"));
             if (components != null) {
                 Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
                 if (schemas != null) {
