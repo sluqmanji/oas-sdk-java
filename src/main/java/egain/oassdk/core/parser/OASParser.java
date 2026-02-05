@@ -319,7 +319,10 @@ public class OASParser {
                         // This can happen if the resolved content itself contains a $ref
                         // but for external file references, the resolved content should be the schema itself
                         map.remove("$ref");
-                        
+                        // Preserve original ref path for internal refs so generators (e.g. XSD) can emit imports/type refs
+                        if (ref != null && ref.startsWith("#/components/schemas/")) {
+                            map.put("x-resolved-ref", ref);
+                        }
                         
                         // Recursively resolve any references in the resolved content
                         // Note: We keep refKey in resolvingRefs to detect circular references in nested content

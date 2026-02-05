@@ -815,24 +815,32 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             if (schema == null) continue;
 
             // Check properties in this schema (but don't register the schema itself as inline)
-            collectInlineSchemasFromSchemaProperties(schema, null, spec, visited, topLevelSchemaObjects);
+            collectInlineSchemasFromSchemaProperties(schema, null, spec, visited, topLevelSchemaObjects, false, 0);
         }
     }
+
+    /** Max recursion depth for collectInlineSchemasFromSchemaProperties to prevent StackOverflow on large specs. */
+    private static final int MAX_INLINE_SCHEMA_COLLECTION_DEPTH = 25;
 
     /**
      * Recursively collect inline object schemas from a schema's properties
      */
     private void collectInlineSchemasFromSchemaProperties(Map<String, Object> schema, String parentPropertyName, Map<String, Object> spec, Set<Object> visited, Set<Object> topLevelSchemaObjects) {
-        collectInlineSchemasFromSchemaProperties(schema, parentPropertyName, spec, visited, topLevelSchemaObjects, false);
+        collectInlineSchemasFromSchemaProperties(schema, parentPropertyName, spec, visited, topLevelSchemaObjects, false, 0);
     }
 
     /**
      * Recursively collect inline object schemas from a schema's properties
      *
      * @param isInCompositionContext true if this schema is being processed as part of an allOf/oneOf/anyOf composition
+     * @param depth current recursion depth (0 at top level)
      */
-    private void collectInlineSchemasFromSchemaProperties(Map<String, Object> schema, String parentPropertyName, Map<String, Object> spec, Set<Object> visited, Set<Object> topLevelSchemaObjects, boolean isInCompositionContext) {
+    private void collectInlineSchemasFromSchemaProperties(Map<String, Object> schema, String parentPropertyName, Map<String, Object> spec, Set<Object> visited, Set<Object> topLevelSchemaObjects, boolean isInCompositionContext, int depth) {
         if (schema == null) return;
+        if (depth > MAX_INLINE_SCHEMA_COLLECTION_DEPTH) {
+            logger.warning("Recursion depth limit reached in collectInlineSchemasFromSchemaProperties: " + depth);
+            return;
+        }
 
         // Prevent infinite recursion - check if we've already visited this schema
         if (visited.contains(schema)) {
@@ -857,7 +865,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                 // Add to visited BEFORE recursing to prevent infinite loops
                                 if (visited.add(referencedSchema)) {
                                     // Only recurse if we successfully added (wasn't already visited)
-                                    collectInlineSchemasFromSchemaProperties(referencedSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext);
+                                    collectInlineSchemasFromSchemaProperties(referencedSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext, depth + 1);
                                 }
                             }
                         }
@@ -874,7 +882,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 for (Map<String, Object> subSchema : allOfSchemas) {
                     if (subSchema != null) {
                         // Process sub-schemas in composition context - inline objects in allOf should not be separate models
-                        collectInlineSchemasFromSchemaProperties(subSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, true);
+                        collectInlineSchemasFromSchemaProperties(subSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, true, depth + 1);
                     }
                 }
             }
@@ -887,7 +895,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 for (Map<String, Object> subSchema : schemasList) {
                     if (subSchema != null) {
                         // Process sub-schemas in composition context - inline objects in oneOf/anyOf should not be separate models
-                        collectInlineSchemasFromSchemaProperties(subSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, true);
+                        collectInlineSchemasFromSchemaProperties(subSchema, parentPropertyName, spec, visited, topLevelSchemaObjects, true, depth + 1);
                     }
                 }
             }
@@ -915,7 +923,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
                     Map<String, Object> propertySchema = Util.asStringObjectMap(propertyValue);
                     if (propertySchema != null) {
-                        collectInlineSchemasFromSchemaProperties(propertySchema, propertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext);
+                        collectInlineSchemasFromSchemaProperties(propertySchema, propertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext, depth + 1);
                     }
                 }
             }
@@ -926,7 +934,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             Object itemsObj = schema.get("items");
             Map<String, Object> itemsMap = Util.asStringObjectMap(itemsObj);
             if (itemsMap != null) {
-                collectInlineSchemasFromSchemaProperties(itemsMap, parentPropertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext);
+                collectInlineSchemasFromSchemaProperties(itemsMap, parentPropertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext, depth + 1);
             }
         }
     }
@@ -1352,6 +1360,33 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         Map<String, Object> schema = Util.asStringObjectMap(schemaObj);
         if (schema == null) {
+            return;
+        }
+
+        // Check for x-resolved-ref (parser preserves this when $ref was resolved) - add schema name immediately
+        String resolvedRefSchemaName = getSchemaNameFromRef(schema);
+        if (resolvedRefSchemaName != null) {
+            if (!referencedSchemas.contains(resolvedRefSchemaName)) {
+                referencedSchemas.add(resolvedRefSchemaName);
+                components = Util.asStringObjectMap(spec.get("components"));
+                if (components != null) {
+                    Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+                    if (schemas != null && schemas.containsKey(resolvedRefSchemaName) && depth < 15) {
+                        Map<String, Object> referencedSchema = Util.asStringObjectMap(schemas.get(resolvedRefSchemaName));
+                        if (referencedSchema != null && !visited.containsKey(referencedSchema)) {
+                            visited.put(referencedSchema, Boolean.TRUE);
+                            if (referencedSchema.containsKey("type") && "array".equals(referencedSchema.get("type"))) {
+                                Object items = referencedSchema.get("items");
+                                if (items != null) {
+                                    collectSchemasFromSchemaObject(items, referencedSchemas, spec, visited, depth + 1);
+                                }
+                            } else {
+                                collectSchemasFromSchemaObject(referencedSchema, referencedSchemas, spec, visited, depth + 1);
+                            }
+                        }
+                    }
+                }
+            }
             return;
         }
 
@@ -2871,43 +2906,52 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 for (Map.Entry<String, Object> property : properties.entrySet()) {
                     Map<String, Object> propertySchema = Util.asStringObjectMap(property.getValue());
                     if (propertySchema != null) {
-                        // Direct $ref check
-                        String propRef = (String) propertySchema.get("$ref");
-                        if (propRef != null && propRef.startsWith("#/components/schemas/")) {
-                            String refSchemaName = propRef.substring(propRef.lastIndexOf("/") + 1);
-                            if (allSchemas.containsKey(refSchemaName) && !referencedNamespaces.contains(refSchemaName)) {
-                                referencedNamespaces.add(refSchemaName);
-                            }
-                        } else if (propRef == null) {
-                            // $ref might have been resolved by parser - try identity matching
-                            // This is important: parser may replace $ref with actual schema object
-                            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                if (candidateSchema == propertySchema && !referencedNamespaces.contains(schemaEntry.getKey())) {
-                                    referencedNamespaces.add(schemaEntry.getKey());
-                                    break;
+                        // Prefer x-resolved-ref (parser preserves this when $ref was resolved)
+                        String refSchemaName = getSchemaNameFromRef(propertySchema);
+                        if (refSchemaName != null && allSchemas.containsKey(refSchemaName) && !referencedNamespaces.contains(refSchemaName)) {
+                            referencedNamespaces.add(refSchemaName);
+                        } else {
+                            // Direct $ref check (unresolved refs)
+                            String propRef = (String) propertySchema.get("$ref");
+                            if (propRef != null && propRef.startsWith("#/components/schemas/")) {
+                                refSchemaName = propRef.substring(propRef.lastIndexOf("/") + 1);
+                                if (allSchemas.containsKey(refSchemaName) && !referencedNamespaces.contains(refSchemaName)) {
+                                    referencedNamespaces.add(refSchemaName);
+                                }
+                            } else if (propRef == null) {
+                                // $ref was resolved but no x-resolved-ref - try identity matching only (no type-based guess)
+                                for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                    if (candidateSchema == propertySchema && !referencedNamespaces.contains(schemaEntry.getKey())) {
+                                        referencedNamespaces.add(schemaEntry.getKey());
+                                        break;
+                                    }
                                 }
                             }
                         }
-                        // Check array items for $refs
+                        // Check array items for $refs / x-resolved-ref
                         if (propertySchema.containsKey("type") && "array".equals(propertySchema.get("type"))) {
                             Object itemsObj = propertySchema.get("items");
                             if (itemsObj != null) {
                                 Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
                                 if (itemsSchema != null) {
-                                    String itemsRef = (String) itemsSchema.get("$ref");
-                                    if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
-                                        String refSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
-                                        if (allSchemas.containsKey(refSchemaName) && !referencedNamespaces.contains(refSchemaName)) {
-                                            referencedNamespaces.add(refSchemaName);
-                                        }
-                                    } else if (itemsRef == null) {
-                                        // $ref might have been resolved - try identity matching for items
-                                        for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                            Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                            if (candidateSchema == itemsSchema && !referencedNamespaces.contains(schemaEntry.getKey())) {
-                                                referencedNamespaces.add(schemaEntry.getKey());
-                                                break;
+                                    String itemsRefSchemaName = getSchemaNameFromRef(itemsSchema);
+                                    if (itemsRefSchemaName != null && allSchemas.containsKey(itemsRefSchemaName) && !referencedNamespaces.contains(itemsRefSchemaName)) {
+                                        referencedNamespaces.add(itemsRefSchemaName);
+                                    } else {
+                                        String itemsRef = (String) itemsSchema.get("$ref");
+                                        if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
+                                            itemsRefSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
+                                            if (allSchemas.containsKey(itemsRefSchemaName) && !referencedNamespaces.contains(itemsRefSchemaName)) {
+                                                referencedNamespaces.add(itemsRefSchemaName);
+                                            }
+                                        } else if (itemsRef == null) {
+                                            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                                if (candidateSchema == itemsSchema && !referencedNamespaces.contains(schemaEntry.getKey())) {
+                                                    referencedNamespaces.add(schemaEntry.getKey());
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
@@ -3149,6 +3193,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 // Skip if schema has too many properties (expensive to compare)
                 if (schemaPropertiesCount <= 50) {
                     for (String refSchema : referencedNamespaces) {
+                        if (refSchema.equals(schemaName)) continue; // Never treat current schema as resolved ref to itself
                         Map<String, Object> candidateSchema = Util.asStringObjectMap(allSchemas.get(refSchema));
                         if (candidateSchema != null && !candidateSchema.containsKey("$ref")) {
                             // Lightweight comparison: check type and properties count only
@@ -3296,53 +3341,24 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         Map<String, Object> propertySchema = Util.asStringObjectMap(property.getValue());
                         if (propertySchema != null) {
                             // Check if propertySchema has a $ref (not resolved yet)
-                            String propRef = (String) propertySchema.get("$ref");
-                            if (propRef != null && propRef.startsWith("#/components/schemas/")) {
-                                String refSchemaName = propRef.substring(propRef.lastIndexOf("/") + 1);
-                                if (allSchemas.containsKey(refSchemaName) && !referencedSchemas.contains(refSchemaName)) {
-                                    referencedSchemas.add(refSchemaName);
-                                }
+                            // Prefer x-resolved-ref (parser preserves this when $ref was resolved)
+                            String refSchemaName = getSchemaNameFromRef(propertySchema);
+                            if (refSchemaName != null && allSchemas.containsKey(refSchemaName) && !referencedSchemas.contains(refSchemaName)) {
+                                referencedSchemas.add(refSchemaName);
                             } else {
-                                // $ref might have been resolved by parser - try identity matching
-                                // This is important: parser may replace $ref with actual schema object
-                                // Limit iterations to prevent StackOverflow, but ensure we check at least some schemas
-                                int maxIterations = Math.min(allSchemas.size(), 200);
-                                int iterationCount = 0;
-                                boolean found = false;
-                                for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                    if (++iterationCount > maxIterations) {
-                                        break;
+                                String propRef = (String) propertySchema.get("$ref");
+                                if (propRef != null && propRef.startsWith("#/components/schemas/")) {
+                                    refSchemaName = propRef.substring(propRef.lastIndexOf("/") + 1);
+                                    if (allSchemas.containsKey(refSchemaName) && !referencedSchemas.contains(refSchemaName)) {
+                                        referencedSchemas.add(refSchemaName);
                                     }
-                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                    // Identity match: if propertySchema is the same object as a schema, it's a resolved $ref
-                                    if (candidateSchema == propertySchema) {
-                                        if (!referencedSchemas.contains(schemaEntry.getKey())) {
+                                } else if (propRef == null) {
+                                    // Identity match only (no type-based guess to avoid wrong schema)
+                                    for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                        if (candidateSchema == propertySchema && !referencedSchemas.contains(schemaEntry.getKey())) {
                                             referencedSchemas.add(schemaEntry.getKey());
-                                        }
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                // If identity match failed and propertySchema looks like a schema (has type or properties),
-                                // it might be a resolved $ref that we need to handle
-                                if (!found && (propertySchema.containsKey("type") || propertySchema.containsKey("properties"))) {
-                                    // Try to find matching schema by checking if propertySchema structure matches
-                                    // But only do this for small schemas to avoid StackOverflow
-                                    if (allSchemas.size() <= 100) {
-                                        for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                            Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                            if (candidateSchema != null && candidateSchema != propertySchema && 
-                                                !candidateSchema.containsKey("$ref") && 
-                                                !referencedSchemas.contains(schemaEntry.getKey())) {
-                                                // Lightweight check: same type
-                                                String propType = (String) propertySchema.get("type");
-                                                String candType = (String) candidateSchema.get("type");
-                                                if (propType != null && propType.equals(candType)) {
-                                                    // Could be a match - add it (better to have extra imports than missing ones)
-                                                    referencedSchemas.add(schemaEntry.getKey());
-                                                    break;
-                                                }
-                                            }
+                                            break;
                                         }
                                     }
                                 }
@@ -3353,24 +3369,23 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                 if (itemsObj != null) {
                                     Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
                                     if (itemsSchema != null) {
-                                        String itemsRef = (String) itemsSchema.get("$ref");
-                                        if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
-                                            String refSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
-                                            if (allSchemas.containsKey(refSchemaName) && !referencedSchemas.contains(refSchemaName)) {
-                                                referencedSchemas.add(refSchemaName);
-                                            }
+                                        String itemsRefSchemaName = getSchemaNameFromRef(itemsSchema);
+                                        if (itemsRefSchemaName != null && allSchemas.containsKey(itemsRefSchemaName) && !referencedSchemas.contains(itemsRefSchemaName)) {
+                                            referencedSchemas.add(itemsRefSchemaName);
                                         } else {
-                                            // $ref might have been resolved - try identity matching for items
-                                            int maxIterations = Math.min(allSchemas.size(), 200);
-                                            int iterationCount = 0;
-                                            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                                if (++iterationCount > maxIterations) {
-                                                    break;
+                                            String itemsRef = (String) itemsSchema.get("$ref");
+                                            if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
+                                                itemsRefSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
+                                                if (allSchemas.containsKey(itemsRefSchemaName) && !referencedSchemas.contains(itemsRefSchemaName)) {
+                                                    referencedSchemas.add(itemsRefSchemaName);
                                                 }
-                                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                                if (candidateSchema == itemsSchema && !referencedSchemas.contains(schemaEntry.getKey())) {
-                                                    referencedSchemas.add(schemaEntry.getKey());
-                                                    break;
+                                            } else if (itemsRef == null) {
+                                                for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                                    if (candidateSchema == itemsSchema && !referencedSchemas.contains(schemaEntry.getKey())) {
+                                                        referencedSchemas.add(schemaEntry.getKey());
+                                                        break;
+                                                    }
                                                 }
                                             }
                                         }
@@ -3586,41 +3601,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 if (itemsObj != null) {
                     Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
                     if (itemsSchema != null) {
-                        // Check if items schema has a $ref - if so, reference it directly
-                        String itemsRef = (String) itemsSchema.get("$ref");
-                        String refSchemaName = null;
-                        if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
-                            refSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
-                        } else {
-                            // If $ref was resolved by parser, match the resolved schema to its name
-                            // Check if itemsSchema matches any schema in allSchemas by identity or structure
-                            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                // Check by identity first (parser might replace in place)
-                                if (candidateSchema == itemsSchema) {
-                                    refSchemaName = schemaEntry.getKey();
-                                    break;
-                                }
-                            }
-                            // If identity didn't match, try structure matching
-                            if (refSchemaName == null) {
-                                Object itemsType = itemsSchema.get("type");
-                                Object itemsProperties = itemsSchema.get("properties");
+                        // Prefer x-resolved-ref (parser preserves this), then $ref, then identity match
+                        String refSchemaName = getSchemaNameFromRef(itemsSchema);
+                        if (refSchemaName == null) {
+                            String itemsRef = (String) itemsSchema.get("$ref");
+                            if (itemsRef != null && itemsRef.startsWith("#/components/schemas/")) {
+                                refSchemaName = itemsRef.substring(itemsRef.lastIndexOf("/") + 1);
+                            } else {
                                 for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
                                     Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                    if (candidateSchema != null) {
-                                        Object candidateType = candidateSchema.get("type");
-                                        // Skip expensive properties.equals() comparison to prevent StackOverflow
-                                        // Use lightweight heuristic: match by type and properties count
-                                        if (itemsType != null && itemsType.equals(candidateType)) {
-                                            Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
-                                            int itemsPropsCount = (itemsProperties != null) ? ((Map<?, ?>)itemsProperties).size() : 0;
-                                            int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
-                                            if (itemsPropsCount == candidatePropsCount && itemsPropsCount > 0) {
-                                                refSchemaName = schemaEntry.getKey();
-                                                break;
-                                            }
-                                        }
+                                    if (candidateSchema == itemsSchema) {
+                                        refSchemaName = schemaEntry.getKey();
+                                        break;
                                     }
                                 }
                             }
@@ -3742,25 +3734,22 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
         visited.add(propertySchema);
         
-        // Check for $ref
-        String ref = (String) propertySchema.get("$ref");
-        String refSchemaName = null;
-        if (ref != null && ref.startsWith("#/components/schemas/")) {
-            refSchemaName = ref.substring(ref.lastIndexOf("/") + 1);
-        } else {
-            // If $ref was resolved by parser, match the resolved schema to its name
-            // Check if propertySchema matches any schema in allSchemas by identity or structure
-            for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
-                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                // Check by identity first (parser might replace in place)
-                if (candidateSchema == propertySchema) {
-                    refSchemaName = schemaEntry.getKey();
-                    break;
+        // Check for x-resolved-ref (parser preserves this) or $ref
+        String refSchemaName = getSchemaNameFromRef(propertySchema);
+        if (refSchemaName == null) {
+            String ref = (String) propertySchema.get("$ref");
+            if (ref != null && ref.startsWith("#/components/schemas/")) {
+                refSchemaName = ref.substring(ref.lastIndexOf("/") + 1);
+            } else {
+                // Identity match only when $ref was resolved but no x-resolved-ref
+                for (Map.Entry<String, Object> schemaEntry : allSchemas.entrySet()) {
+                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                    if (candidateSchema == propertySchema) {
+                        refSchemaName = schemaEntry.getKey();
+                        break;
+                    }
                 }
             }
-            // Skip expensive structure matching using equals() to prevent StackOverflow
-            // Rely only on identity-based matching which is O(1) and safe
-            // If identity didn't match, we can't safely determine the schema name without expensive comparison
         }
         if (refSchemaName != null) {
             xsd.append(" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"");
@@ -3978,6 +3967,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     /**
      * Get XSD type from OpenAPI schema
      */
+    /**
+     * Extract component schema name from x-resolved-ref or $ref (e.g. "#/components/schemas/UserView" -> "UserView").
+     */
+    private String getSchemaNameFromRef(Map<String, Object> schema) {
+        if (schema == null) return null;
+        String ref = (String) schema.get("x-resolved-ref");
+        if (ref == null) ref = (String) schema.get("$ref");
+        if (ref == null || !ref.contains("#/components/schemas/")) return null;
+        return ref.substring(ref.lastIndexOf("/") + 1);
+    }
+
     private String getXSDType(Map<String, Object> schema, Map<String, Object> allSchemas) {
         if (schema == null) {
             return "xs:anyType";
@@ -4076,12 +4076,15 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                   .replace("'", "&apos;");
     }
 
+    /** Max recursion depth for mergeSchemaProperties to prevent StackOverflow on large specs. */
+    private static final int MAX_MERGE_SCHEMA_DEPTH = 15;
+
     /**
      * Merge schema properties into the allProperties map
      */
     private void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
                                        List<String> allRequired, Map<String, Object> spec) {
-        mergeSchemaProperties(schema, allProperties, allRequired, spec, new java.util.IdentityHashMap<>());
+        mergeSchemaProperties(schema, allProperties, allRequired, spec, new java.util.IdentityHashMap<>(), 0);
     }
 
     /**
@@ -4090,7 +4093,20 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     private void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
                                        List<String> allRequired, Map<String, Object> spec,
                                        java.util.Map<Object, Boolean> visited) {
+        mergeSchemaProperties(schema, allProperties, allRequired, spec, visited, 0);
+    }
+
+    /**
+     * Merge schema properties with cycle detection and depth limit to prevent StackOverflow
+     */
+    private void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
+                                       List<String> allRequired, Map<String, Object> spec,
+                                       java.util.Map<Object, Boolean> visited, int depth) {
         if (schema == null) return;
+        if (depth > MAX_MERGE_SCHEMA_DEPTH) {
+            logger.warning("Recursion depth limit reached in mergeSchemaProperties: " + depth);
+            return;
+        }
 
         // Cycle detection - prevent infinite recursion
         if (visited.containsKey(schema)) {
@@ -4139,7 +4155,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         if (schemas != null && schemas.containsKey(schemaName)) {
                             Map<String, Object> referencedSchema = Util.asStringObjectMap(schemas.get(schemaName));
                             if (referencedSchema != null) {
-                                mergeSchemaProperties(referencedSchema, allProperties, allRequired, spec, visited);
+                                mergeSchemaProperties(referencedSchema, allProperties, allRequired, spec, visited, depth + 1);
                             }
                         }
                     }
@@ -4153,7 +4169,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         if (schemas != null && schemas.containsKey(schemaName)) {
                             Map<String, Object> referencedSchema = Util.asStringObjectMap(schemas.get(schemaName));
                             if (referencedSchema != null) {
-                                mergeSchemaProperties(referencedSchema, allProperties, allRequired, spec, visited);
+                                mergeSchemaProperties(referencedSchema, allProperties, allRequired, spec, visited, depth + 1);
                             }
                         }
                     }
@@ -4199,7 +4215,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             if (allOfSchemas != null) {
                 for (Map<String, Object> subSchema : allOfSchemas) {
                     if (subSchema != null) {
-                        mergeSchemaProperties(subSchema, allProperties, allRequired, spec, visited);
+                        mergeSchemaProperties(subSchema, allProperties, allRequired, spec, visited, depth + 1);
                     }
                 }
             }
@@ -4213,7 +4229,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             if (schemas != null) {
                 for (Map<String, Object> subSchema : schemas) {
                     if (subSchema != null) {
-                        mergeSchemaProperties(subSchema, allProperties, allRequired, spec, visited);
+                        mergeSchemaProperties(subSchema, allProperties, allRequired, spec, visited, depth + 1);
                     }
                 }
             }
