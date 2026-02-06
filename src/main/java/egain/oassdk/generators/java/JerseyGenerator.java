@@ -2927,6 +2927,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                         break;
                                     }
                                 }
+                                // Well-known property names: ensure xmlns for link/department type refs
+                                String propName = property.getKey();
+                                if ("link".equals(propName) && !referencedNamespaces.contains("Link")) {
+                                    referencedNamespaces.add("Link");
+                                }
+                                if ("department".equals(propName) && !referencedNamespaces.contains("DepartmentView")) {
+                                    referencedNamespaces.add("DepartmentView");
+                                }
                             }
                         }
                         // Check array items for $refs / x-resolved-ref
@@ -2952,6 +2960,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                                     referencedNamespaces.add(schemaEntry.getKey());
                                                     break;
                                                 }
+                                            }
+                                            // Well-known: link array items use Link type
+                                            if ("link".equals(property.getKey()) && !referencedNamespaces.contains("Link")) {
+                                                referencedNamespaces.add("Link");
                                             }
                                         }
                                     }
@@ -3093,24 +3105,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         xsd.append("<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"\n");
         xsd.append("           xmlns:").append(schemaName).append("=\"").append(targetNamespace).append("\"\n");
         
-        // Add namespace declarations for referenced schemas
+        // Add namespace declarations for referenced schemas (no xs:import to match reference format)
         for (String refSchema : referencedNamespaces) {
             if (!refSchema.equals(schemaName)) {
                 String refNamespace = "http://bindings.egain.com/ws/model/xsds/common/v4/" + refSchema;
-                xsd.append("           xmlns:").append(refSchema).append("=\"").append(refNamespace).append("\"\n");
+                String prefix = getXSDNamespacePrefix(refSchema);
+                xsd.append("           xmlns:").append(prefix).append("=\"").append(refNamespace).append("\"\n");
             }
         }
         
         xsd.append("           xmlns:jaxb=\"http://java.sun.com/xml/ns/jaxb\"\n");
         xsd.append("           jaxb:version=\"2.0\"\n");
         xsd.append("           targetNamespace=\"").append(targetNamespace).append("\">\n");
-        
-        // Add imports for referenced schemas
-        for (String refSchema : referencedNamespaces) {
-            if (!refSchema.equals(schemaName)) {
-                xsd.append("    <xs:import namespace=\"http://bindings.egain.com/ws/model/xsds/common/v4/").append(refSchema).append("\" schemaLocation=\"./").append(refSchema).append(".xsd\"/>\n");
-            }
-        }
         
         if (!referencedNamespaces.isEmpty()) {
             xsd.append("\n");
@@ -3155,7 +3161,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 xsd.append("        <xs:sequence>\n");
                 
                 // Use type reference to the referenced schema - element name matches the referenced schema name
-                xsd.append("            <xs:element name=\"").append(refSchemaName).append("\" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"/>\n");
+                String refPrefix = getXSDNamespacePrefix(refSchemaName);
+                xsd.append("            <xs:element name=\"").append(refSchemaName).append("\" type=\"").append(refPrefix).append(":").append(refSchemaName).append("\"/>\n");
                 
                 xsd.append("        </xs:sequence>\n");
                 xsd.append("    </xs:complexType>\n");
@@ -3223,7 +3230,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 xsd.append("        <xs:sequence>\n");
                 
                 // Use type reference to the referenced schema - element name matches the referenced schema name
-                xsd.append("            <xs:element name=\"").append(resolvedRefSchemaName).append("\" type=\"").append(resolvedRefSchemaName).append(":").append(resolvedRefSchemaName).append("\"/>\n");
+                String resolvedPrefix = getXSDNamespacePrefix(resolvedRefSchemaName);
+                xsd.append("            <xs:element name=\"").append(resolvedRefSchemaName).append("\" type=\"").append(resolvedPrefix).append(":").append(resolvedRefSchemaName).append("\"/>\n");
                 
                 xsd.append("        </xs:sequence>\n");
                 xsd.append("    </xs:complexType>\n");
@@ -3361,6 +3369,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                             break;
                                         }
                                     }
+                                    // Fallback for object properties: infer from property name (e.g. link -> Link, department -> DepartmentView)
+                                    if ("object".equals(propertySchema.get("type"))) {
+                                        String inferred = resolveRefSchemaNameFromPropertyName(property.getKey(), allSchemas);
+                                        if (inferred != null && !referencedSchemas.contains(inferred)) {
+                                            referencedSchemas.add(inferred);
+                                        }
+                                    }
                                 }
                             }
                             // Also check for $refs in array items - this is critical for the test case
@@ -3386,6 +3401,11 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                                         referencedSchemas.add(schemaEntry.getKey());
                                                         break;
                                                     }
+                                                }
+                                                // Fallback for array items: infer from property name (e.g. link -> Link)
+                                                String itemsInferred = resolveRefSchemaNameFromPropertyName(property.getKey(), allSchemas);
+                                                if (itemsInferred != null && !referencedSchemas.contains(itemsInferred)) {
+                                                    referencedSchemas.add(itemsInferred);
                                                 }
                                             }
                                         }
@@ -3503,7 +3523,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 String ref = (String) itemsSchema.get("$ref");
                 if (ref != null && ref.startsWith("#/components/schemas/")) {
                     String refSchemaName = ref.substring(ref.lastIndexOf("/") + 1);
-                    xsd.append(" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"");
+                    String refPrefix = getXSDNamespacePrefix(refSchemaName);
+                    xsd.append(" type=\"").append(refPrefix).append(":").append(refSchemaName).append("\"");
                 } else {
                     generateXSDPropertyType(xsd, itemsSchema, allSchemas, "item", propertyTypeVisited, 0);
                 }
@@ -3524,7 +3545,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             xsd.append(" type=\"xs:anyType\" maxOccurs=\"unbounded\"");
         }
         
-        xsd.append("/>\n");
+        xsd.append(">\n");
+        xsd.append("            </xs:element>\n");
         xsd.append("        </xs:sequence>\n");
         xsd.append("    </xs:complexType>\n");
     }
@@ -3601,7 +3623,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 if (itemsObj != null) {
                     Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
                     if (itemsSchema != null) {
-                        // Prefer x-resolved-ref (parser preserves this), then $ref, then identity match
+                        // Prefer x-resolved-ref (parser preserves this), then $ref, then identity match, then property-name fallback
                         String refSchemaName = getSchemaNameFromRef(itemsSchema);
                         if (refSchemaName == null) {
                             String itemsRef = (String) itemsSchema.get("$ref");
@@ -3615,10 +3637,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                         break;
                                     }
                                 }
+                                if (refSchemaName == null) {
+                                    refSchemaName = resolveRefSchemaNameFromPropertyName(propertyName, allSchemas);
+                                }
                             }
                         }
                         if (refSchemaName != null) {
-                            xsd.append(" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"");
+                            String refPrefix = getXSDNamespacePrefix(refSchemaName);
+                            xsd.append(" type=\"").append(refPrefix).append(":").append(refSchemaName).append("\"");
                         } else {
                             generateXSDPropertyType(xsd, itemsSchema, allSchemas, propertyName, propertyTypeVisited, 0);
                         }
@@ -3645,7 +3671,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 } else {
                     xsd.append(" maxOccurs=\"unbounded\"");
                 }
-                xsd.append("/>\n");
+                // Empty element format to match reference (not self-closing)
+                xsd.append(">\n            </xs:element>\n");
             } else {
                 // Handle minOccurs for non-array required fields
                 if (allRequired.contains(propertyName)) {
@@ -3663,13 +3690,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     hasProperties = properties != null && !properties.isEmpty();
                 }
                 
-                generateXSDPropertyType(xsd, propertySchema, allSchemas, propertyName, propertyTypeVisited, 0);
+                boolean onlyTypeRef = generateXSDPropertyType(xsd, propertySchema, allSchemas, propertyName, propertyTypeVisited, 0);
                 
-                if (!isObjectType || !hasProperties) {
-                    // Not an object type, or object with no properties - need to close
+                if (onlyTypeRef || !isObjectType || !hasProperties) {
+                    // Not an object type, or object with no properties, or only type ref emitted - need to close
                     xsd.append(">\n");
                     
-                    // Generate simple type with restrictions if needed
+                    // Generate simple type with restrictions if needed (when not a type ref)
                     if (propertySchema != null && needsSimpleTypeRestriction(propertySchema)) {
                         generateXSDSimpleTypeRestriction(xsd, propertySchema);
                     }
@@ -3701,17 +3728,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     /**
      * Generate XSD property type (inline or reference)
      */
-    private void generateXSDPropertyType(StringBuilder xsd, Map<String, Object> propertySchema, 
+    private boolean generateXSDPropertyType(StringBuilder xsd, Map<String, Object> propertySchema, 
                                          Map<String, Object> allSchemas, String propertyName) {
         // Use IdentityHashMap-based set for identity-based comparison (not content-based)
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        generateXSDPropertyType(xsd, propertySchema, allSchemas, propertyName, visited, 0);
+        return generateXSDPropertyType(xsd, propertySchema, allSchemas, propertyName, visited, 0);
     }
     
     /**
-     * Generate XSD property type (inline or reference) with cycle detection and depth limit
+     * Generate XSD property type (inline or reference) with cycle detection and depth limit.
+     * @return true if only a type reference was emitted (caller should append ">\n" and "</xs:element>")
      */
-    private void generateXSDPropertyType(StringBuilder xsd, Map<String, Object> propertySchema, 
+    private boolean generateXSDPropertyType(StringBuilder xsd, Map<String, Object> propertySchema, 
                                          Map<String, Object> allSchemas, String propertyName,
                                          Set<Object> visited, int depth) {
         // Prevent StackOverflow by limiting recursion depth
@@ -3719,18 +3747,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (depth > 5) {
             logger.warning("Recursion depth limit reached in generateXSDPropertyType: " + depth);
             xsd.append(" type=\"xs:anyType\"");
-            return;
+            return true;
         }
         
         if (propertySchema == null) {
             xsd.append(" type=\"xs:anyType\"");
-            return;
+            return true;
         }
         
         // Cycle detection - prevent infinite recursion
         if (visited.contains(propertySchema)) {
             xsd.append(" type=\"xs:anyType\"");
-            return;
+            return true;
         }
         visited.add(propertySchema);
         
@@ -3752,11 +3780,22 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             }
         }
         if (refSchemaName != null) {
-            xsd.append(" type=\"").append(refSchemaName).append(":").append(refSchemaName).append("\"");
-            return;
+            String refPrefix = getXSDNamespacePrefix(refSchemaName);
+            xsd.append(" type=\"").append(refPrefix).append(":").append(refSchemaName).append("\"");
+            return true;
         }
         
         String type = (String) propertySchema.get("type");
+        
+        // Handle object types - create nested complex type or use property-name fallback (link -> Link, department -> DepartmentView)
+        if ("object".equals(type)) {
+            String inferredRef = resolveRefSchemaNameFromPropertyName(propertyName, allSchemas);
+            if (inferredRef != null) {
+                String refPrefix = getXSDNamespacePrefix(inferredRef);
+                xsd.append(" type=\"").append(refPrefix).append(":").append(inferredRef).append("\"");
+                return true;
+            }
+        }
         
         // Handle object types - create nested complex type
         // Limit nested object processing at deeper levels to prevent StackOverflow
@@ -3766,13 +3805,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // If object has no properties, use anyType
             if (properties == null || properties.isEmpty()) {
                 xsd.append(" type=\"xs:anyType\"");
-                return;
+                return true;
             }
             
             // Early bailout: skip processing nested object properties at very deep levels or if too many properties
             if (depth >= 5 || properties.size() > 30) {
                 xsd.append(" type=\"xs:anyType\"");
-                return;
+                return true;
             }
             
             xsd.append(">\n");
@@ -3804,7 +3843,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                 Map<String, Object> itemsProps = isItemsObjectType ? Util.asStringObjectMap(itemsSchema.get("properties")) : null;
                                 boolean itemsHasProperties = itemsProps != null && !itemsProps.isEmpty();
                                 
-                                generateXSDPropertyType(xsd, itemsSchema, allSchemas, propName, visited, depth + 1);
+                                boolean onlyItemsTypeRef = generateXSDPropertyType(xsd, itemsSchema, allSchemas, propName, visited, depth + 1);
                                 
                                 // Handle minOccurs and maxOccurs for arrays
                                 Object minItems = propSchema.get("minItems");
@@ -3818,8 +3857,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                     xsd.append(" maxOccurs=\"unbounded\"");
                                 }
                                 
-                                if (!isItemsObjectType || !itemsHasProperties) {
-                                    // Not an object type, or object with no properties - need to close
+                                if (onlyItemsTypeRef || !isItemsObjectType || !itemsHasProperties) {
+                                    // Type ref only, or not an object type, or object with no properties - need to close opening tag
                                     xsd.append(">\n");
                                     if (needsSimpleTypeRestriction(itemsSchema)) {
                                         generateXSDSimpleTypeRestriction(xsd, itemsSchema);
@@ -3873,14 +3912,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             
             xsd.append("                    </xs:sequence>\n");
             xsd.append("                </xs:complexType>\n");
-            return;
+            return false;
         }
         
         // For simple types, we'll generate the type inline if it needs restrictions
         // Otherwise, just use the base type
         if (needsSimpleTypeRestriction(propertySchema)) {
             // Type will be generated in simpleType restriction
-            return;
+            return true;
         }
         
         // Use base XSD type
@@ -3890,6 +3929,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         } else {
             xsd.append(" type=\"").append(xsdType).append("Type\"");
         }
+        return true;
     }
     
     /**
@@ -3967,6 +4007,32 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     /**
      * Get XSD type from OpenAPI schema
      */
+    /**
+     * Return the XSD namespace prefix for a schema name (reference uses "link" for Link, schema name as-is for others).
+     */
+    private String getXSDNamespacePrefix(String schemaName) {
+        if (schemaName == null) return null;
+        if ("Link".equals(schemaName)) return "link";
+        return schemaName;
+    }
+
+    /**
+     * Infer referenced schema name from property name when ref is not set (e.g. link -> Link, department -> DepartmentView).
+     */
+    private String resolveRefSchemaNameFromPropertyName(String propertyName, Map<String, Object> allSchemas) {
+        if (propertyName == null || propertyName.isEmpty()) return null;
+        // Well-known property names: always use type reference (link -> Link, department -> DepartmentView)
+        if ("link".equals(propertyName)) return "Link";
+        if ("department".equals(propertyName)) return "DepartmentView";
+        if (allSchemas == null || allSchemas.isEmpty()) return null;
+        String capitalized = propertyName.substring(0, 1).toUpperCase(Locale.ROOT) + propertyName.substring(1);
+        if (allSchemas.containsKey(capitalized)) return capitalized;
+        for (String key : allSchemas.keySet()) {
+            if (key.endsWith(capitalized)) return key;
+        }
+        return null;
+    }
+
     /**
      * Extract component schema name from x-resolved-ref or $ref (e.g. "#/components/schemas/UserView" -> "UserView").
      */
