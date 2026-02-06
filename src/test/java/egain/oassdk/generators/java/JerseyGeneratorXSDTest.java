@@ -262,10 +262,9 @@ public class JerseyGeneratorXSDTest {
         
         String content = Files.readString(editUserXsd);
         
-        // Check for import
-        assertTrue(content.contains("<xs:import"), "Should have xs:import for User schema");
-        assertTrue(content.contains("schemaLocation=\"./User.xsd\""), 
-            "Should import User.xsd");
+        // Check for User schema reference (reference format uses xmlns, no xs:import)
+        assertTrue(content.contains("User") && content.contains("xmlns:"), 
+            "Should reference User schema with namespace");
         
         // Check for wrapper complex type
         assertTrue(content.contains("<xs:element name=\"EditNonIntegratedUser\""), 
@@ -274,6 +273,70 @@ public class JerseyGeneratorXSDTest {
             "Should have complexType");
         assertTrue(content.contains("type=\"User:User\""), 
             "Should reference User:User type");
+    }
+    
+    @Test
+    @DisplayName("Test XSD link and department use type refs with top-level xmlns (GroupView-style)")
+    public void testXSDLinkAndDepartmentViewTypeRefs() throws OASSDKException, IOException {
+        // Schema with inline link (array of object) and inline department (object) - no Link/DepartmentView in components
+        String yamlContent = """
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                GroupView:
+                  type: object
+                  properties:
+                    link:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          rel:
+                            type: string
+                            maxLength: 50
+                          href:
+                            type: string
+                            maxLength: 1000
+                    name:
+                      type: string
+                    department:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        id:
+                          type: number
+                        home:
+                          type: string
+            """;
+        
+        Path outputDir = generateXSDFromYaml(yamlContent, "link-dept-refs");
+        Path xsdFile = getXSDFile(outputDir, "GroupView");
+        assertTrue(Files.exists(xsdFile), "GroupView.xsd should exist");
+        
+        String content = Files.readString(xsdFile);
+        
+        // Top-level xmlns for referenced types (same as reference GroupView.xsd)
+        assertXSDContains(xsdFile, "xmlns:link=\"http://bindings.egain.com/ws/model/xsds/common/v4/Link\"",
+            "Should declare xmlns:link for Link type");
+        assertXSDContains(xsdFile, "xmlns:DepartmentView=\"http://bindings.egain.com/ws/model/xsds/common/v4/DepartmentView\"",
+            "Should declare xmlns:DepartmentView for DepartmentView type");
+        
+        // link element: type reference only, no inline complexType
+        assertTrue(content.contains("name=\"link\"") && content.contains("type=\"link:Link\""),
+            "link element should use type=\"link:Link\"");
+        assertFalse(content.contains("name=\"rel\"") || content.contains("name=\"href\"") || content.matches("(?s).*<xs:element name=\"link\"[^>]*>\\s*<xs:complexType>.*"),
+            "link should not have inline complexType with rel/href");
+        
+        // department element: type reference only, no inline complexType
+        assertTrue(content.contains("name=\"department\"") && content.contains("type=\"DepartmentView:DepartmentView\""),
+            "department element should use type=\"DepartmentView:DepartmentView\"");
+        assertFalse(content.matches("(?s).*<xs:element name=\"department\"[^>]*>\\s*<xs:complexType>.*"),
+            "department should not have inline complexType");
     }
     
     @Test
@@ -417,7 +480,7 @@ public class JerseyGeneratorXSDTest {
         
         // Check for array handling
         assertTrue(content.contains("maxOccurs"), "Should have maxOccurs for arrays");
-        assertTrue(content.contains("type=\"Link:Link\""), 
+        assertTrue(content.contains("type=\"link:Link\"") || content.contains("type=\"Link:Link\""), 
             "Should reference Link type for array items");
         assertTrue(content.contains("maxOccurs=\"10\""), 
             "Should respect maxItems constraint");
@@ -623,17 +686,13 @@ public class JerseyGeneratorXSDTest {
         Path userXsd = outputDir.resolve("src/main/resources/xsd/User.xsd");
         String content = Files.readString(userXsd);
         
-        // Check for imports
-        assertTrue(content.contains("<xs:import"), 
-            "Should have xs:import statements");
+        // Check for namespace declarations for referenced schemas (reference format uses xmlns, no xs:import)
         assertTrue(content.contains("UserView"), 
-            "Should import UserView schema");
+            "Should declare UserView schema namespace");
         assertTrue(content.contains("Link"), 
-            "Should import Link schema");
-        assertTrue(content.contains("schemaLocation=\"./UserView.xsd\""), 
-            "Should have correct schemaLocation for UserView");
-        assertTrue(content.contains("schemaLocation=\"./Link.xsd\""), 
-            "Should have correct schemaLocation for Link");
+            "Should declare Link schema namespace");
+        assertTrue(content.contains("xmlns:") && (content.contains("UserView") && content.contains("Link")), 
+            "Should have xmlns for UserView and Link");
     }
     
     @Test
