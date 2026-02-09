@@ -2927,13 +2927,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                         break;
                                     }
                                 }
-                                // Well-known property names: ensure xmlns for link/department type refs
                                 String propName = property.getKey();
-                                if ("link".equals(propName) && !referencedNamespaces.contains("Link")) {
-                                    referencedNamespaces.add("Link");
-                                }
-                                if ("department".equals(propName) && !referencedNamespaces.contains("DepartmentView")) {
-                                    referencedNamespaces.add("DepartmentView");
+                                String inferred = resolveRefSchemaNameFromPropertyName(propName, allSchemas);
+                                if (inferred != null && allSchemas.containsKey(inferred) && !referencedNamespaces.contains(inferred)) {
+                                    referencedNamespaces.add(inferred);
                                 }
                             }
                         }
@@ -2961,9 +2958,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                                                     break;
                                                 }
                                             }
-                                            // Well-known: link array items use Link type
-                                            if ("link".equals(property.getKey()) && !referencedNamespaces.contains("Link")) {
-                                                referencedNamespaces.add("Link");
+                                            String inferredItems = resolveRefSchemaNameFromPropertyName(property.getKey(), allSchemas);
+                                            if (inferredItems != null && allSchemas.containsKey(inferredItems) && !referencedNamespaces.contains(inferredItems)) {
+                                                referencedNamespaces.add(inferredItems);
                                             }
                                         }
                                     }
@@ -4008,22 +4005,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      * Get XSD type from OpenAPI schema
      */
     /**
-     * Return the XSD namespace prefix for a schema name (reference uses "link" for Link, schema name as-is for others).
+     * Return the XSD namespace prefix for a schema name (schema name as-is for all types).
      */
     private String getXSDNamespacePrefix(String schemaName) {
-        if (schemaName == null) return null;
-        if ("Link".equals(schemaName)) return "link";
         return schemaName;
     }
 
     /**
-     * Infer referenced schema name from property name when ref is not set (e.g. link -> Link, department -> DepartmentView).
+     * Infer referenced schema name from property name when ref is not set (capitalize and match exact or endsWith in allSchemas).
      */
     private String resolveRefSchemaNameFromPropertyName(String propertyName, Map<String, Object> allSchemas) {
         if (propertyName == null || propertyName.isEmpty()) return null;
-        // Well-known property names: always use type reference (link -> Link, department -> DepartmentView)
-        if ("link".equals(propertyName)) return "Link";
-        if ("department".equals(propertyName)) return "DepartmentView";
         if (allSchemas == null || allSchemas.isEmpty()) return null;
         String capitalized = propertyName.substring(0, 1).toUpperCase(Locale.ROOT) + propertyName.substring(1);
         if (allSchemas.containsKey(capitalized)) return capitalized;
