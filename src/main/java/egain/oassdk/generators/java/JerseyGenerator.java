@@ -2019,38 +2019,15 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      */
     private void generateModel(String schemaName, Map<String, Object> schema, String outputDir, String packagePath, Map<String, Object> spec) throws IOException {
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(packagePath).append(".model;\n\n");
-        content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
-        content.append("import javax.validation.constraints.*;\n");
-        content.append("import jakarta.xml.bind.annotation.*;\n");
-        content.append("import jakarta.xml.bind.JAXBElement;\n");
-        content.append("import javax.xml.namespace.QName;\n");
-        content.append("import java.io.Serializable;\n");
-        content.append("import java.util.Objects;\n");
-        content.append("import java.util.List;\n");
-        content.append("import java.util.ArrayList;\n");
-        content.append("import java.util.Set;\n");
-        content.append("import java.util.LinkedHashSet;\n");
-        content.append("import java.util.Map;\n");
-        content.append("import java.util.HashMap;\n");
-        content.append("import javax.xml.datatype.XMLGregorianCalendar;\n\n");
 
-        // Add JAXB annotations
-        content.append("@XmlRootElement(name = \"").append(schemaName).append("\")\n");
-        content.append("@XmlAccessorType(XmlAccessType.FIELD)\n");
-        content.append("@XmlType(name = \"").append(schemaName).append("\", propOrder = {\n");
-
-        // Generate propOrder for JAXB
+        // Build allProperties and fieldNames first (needed for propOrder and for collecting imports)
         Map<String, Object> allProperties = new java.util.LinkedHashMap<>();
         List<String> allRequired = new ArrayList<>();
 
         // Check if this is an array type schema
         boolean isArrayType = schema.containsKey("type") && "array".equals(schema.get("type"));
-        
-        // Handle array types - create a wrapper class with a List field
+
         if (isArrayType) {
-            // For array types, create a wrapper with a single "items" field of type List
-            // We'll handle the List type wrapping when generating the field
             Object itemsObj = schema.get("items");
             if (itemsObj != null) {
                 Map<String, Object> itemsSchema = Util.asStringObjectMap(itemsObj);
@@ -2060,7 +2037,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 }
             }
         } else {
-            // Extract properties first to get field names
             if (schema.containsKey("allOf")) {
                 List<Map<String, Object>> allOfSchemas = Util.asStringObjectMapList(schema.get("allOf"));
                 for (Map<String, Object> subSchema : allOfSchemas) {
@@ -2078,6 +2054,39 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
 
         List<String> fieldNames = new ArrayList<>(allProperties.keySet());
+
+        // Collect referenced model types for imports
+        Set<String> modelImports = new LinkedHashSet<>();
+        for (Map.Entry<String, Object> property : allProperties.entrySet()) {
+            String fieldType = computeFieldTypeForProperty(property.getKey(), Util.asStringObjectMap(property.getValue()), isArrayType, spec);
+            addModelImportTypes(fieldType, schemaName, modelImports);
+        }
+
+        content.append("package ").append(packagePath).append(".model;\n\n");
+        content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
+        content.append("import javax.validation.constraints.*;\n");
+        content.append("import jakarta.xml.bind.annotation.*;\n");
+        content.append("import jakarta.xml.bind.JAXBElement;\n");
+        content.append("import javax.xml.namespace.QName;\n");
+        content.append("import java.io.Serializable;\n");
+        content.append("import java.util.Objects;\n");
+        content.append("import java.util.List;\n");
+        content.append("import java.util.ArrayList;\n");
+        content.append("import java.util.Set;\n");
+        content.append("import java.util.LinkedHashSet;\n");
+        content.append("import java.util.Map;\n");
+        content.append("import java.util.HashMap;\n");
+        content.append("import javax.xml.datatype.XMLGregorianCalendar;\n");
+        for (String typeName : modelImports) {
+            content.append("import ").append(packagePath).append(".model.").append(typeName).append(";\n");
+        }
+        content.append("\n");
+
+        // Add JAXB annotations
+        content.append("@XmlRootElement(name = \"").append(schemaName).append("\")\n");
+        content.append("@XmlAccessorType(XmlAccessType.FIELD)\n");
+        content.append("@XmlType(name = \"").append(schemaName).append("\", propOrder = {\n");
+
         if (!fieldNames.isEmpty()) {
             for (int i = 0; i < fieldNames.size(); i++) {
                 content.append("    \"").append(toCamelCase(fieldNames.get(i))).append("\"");
@@ -2108,85 +2117,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
             // Add JAXB @XmlElement annotation
             String javaFieldName = toCamelCase(fieldName);
-            String fieldType;
-            
-            // If this is an array type schema and the field is "items", wrap in List
-            if (isArrayType && "items".equals(fieldName)) {
-                // For array items, resolve $ref if present - this is critical for proper type resolution
-                String itemType = null;
-                if (fieldSchema != null) {
-                    // First, try to resolve $ref manually (if parser didn't resolve it)
-                    if (fieldSchema.containsKey("$ref")) {
-                        String ref = (String) fieldSchema.get("$ref");
-                        if (ref != null && ref.startsWith("#/components/schemas/")) {
-                            String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
-                            itemType = toJavaClassName(schemaRef);
-                        }
-                    }
-                    // If $ref was resolved by parser, match the resolved schema to its name
-                    if (itemType == null || itemType.isEmpty()) {
-                        // Check if fieldSchema matches any schema in components/schemas
-                        // Parser replaces $ref content in place, but creates a copy of the resolved content
-                        // So we need to match by structure (comparing key properties)
-                        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
-                        if (components != null) {
-                            Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
-                            if (schemas != null && fieldSchema != null) {
-                                // Check by identity first (parser might replace in place in some cases)
-                                for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                    if (candidateSchema == fieldSchema) {
-                                        itemType = toJavaClassName(schemaEntry.getKey());
-                                        break;
-                                    }
-                                }
-                                // If identity didn't match, try structure matching
-                                // Compare key properties to find matching schema
-                                if (itemType == null || itemType.isEmpty()) {
-                                    Object fieldTypeObj = fieldSchema.get("type");
-                                    Object fieldProperties = fieldSchema.get("properties");
-                                    for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                        if (candidateSchema != null) {
-                                            Object candidateType = candidateSchema.get("type");
-                                            // Skip expensive properties.equals() comparison to prevent StackOverflow
-                                            // Use lightweight heuristic: match by type only
-                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType)) {
-                                                // Additional lightweight check: compare properties count if available
-                                                Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
-                                                int fieldPropsCount = (fieldProperties != null) ? ((Map<?, ?>)fieldProperties).size() : 0;
-                                                int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
-                                                if (fieldPropsCount == candidatePropsCount && fieldPropsCount > 0) {
-                                                    itemType = toJavaClassName(schemaEntry.getKey());
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // If still not found, use getJavaType (handles other cases)
-                    if (itemType == null || itemType.isEmpty()) {
-                        itemType = getJavaType(fieldSchema);
-                        // If getJavaType returns "Object" but we have a $ref, try manual resolution again
-                        if ("Object".equals(itemType) && fieldSchema.containsKey("$ref")) {
-                            String ref = (String) fieldSchema.get("$ref");
-                            if (ref != null && ref.startsWith("#/components/schemas/")) {
-                                String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
-                                itemType = toJavaClassName(schemaRef);
-                            }
-                        }
-                    }
-                }
-                if (itemType == null || itemType.isEmpty()) {
-                    itemType = "Object";
-                }
-                fieldType = "List<" + itemType + ">";
-            } else {
-                fieldType = getJavaType(fieldSchema);
-            }
+            String fieldType = computeFieldTypeForProperty(fieldName, fieldSchema, isArrayType, spec);
 
             // Handle arrays/lists with @XmlElementWrapper
             if (fieldType.startsWith("List<")) {
@@ -2223,86 +2154,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
             String fieldName = property.getKey();
             Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
-            String fieldType;
-            
-            // If this is an array type schema and the field is "items", wrap in List
-            if (isArrayType && "items".equals(fieldName)) {
-                // For array items, resolve $ref if present - this is critical for proper type resolution
-                String itemType = null;
-                if (fieldSchema != null) {
-                    // First, try to resolve $ref manually (if parser didn't resolve it)
-                    if (fieldSchema.containsKey("$ref")) {
-                        String ref = (String) fieldSchema.get("$ref");
-                        if (ref != null && ref.startsWith("#/components/schemas/")) {
-                            String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
-                            itemType = toJavaClassName(schemaRef);
-                        }
-                    }
-                    // If $ref was resolved by parser, match the resolved schema to its name
-                    if (itemType == null || itemType.isEmpty()) {
-                        // Check if fieldSchema matches any schema in components/schemas
-                        // Parser replaces $ref content in place, but creates a copy of the resolved content
-                        // So we need to match by structure (comparing key properties)
-                        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
-                        if (components != null) {
-                            Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
-                            if (schemas != null && fieldSchema != null) {
-                                // Check by identity first (parser might replace in place in some cases)
-                                for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                    if (candidateSchema == fieldSchema) {
-                                        itemType = toJavaClassName(schemaEntry.getKey());
-                                        break;
-                                    }
-                                }
-                                // If identity didn't match, try structure matching
-                                // Compare key properties to find matching schema
-                                if (itemType == null || itemType.isEmpty()) {
-                                    Object fieldTypeObj = fieldSchema.get("type");
-                                    Object fieldProperties = fieldSchema.get("properties");
-                                    for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                                        if (candidateSchema != null) {
-                                            Object candidateType = candidateSchema.get("type");
-                                            // Skip expensive properties.equals() comparison to prevent StackOverflow
-                                            // Use lightweight heuristic: match by type only
-                                            if (fieldTypeObj != null && fieldTypeObj.equals(candidateType)) {
-                                                // Additional lightweight check: compare properties count if available
-                                                Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
-                                                int fieldPropsCount = (fieldProperties != null) ? ((Map<?, ?>)fieldProperties).size() : 0;
-                                                int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
-                                                if (fieldPropsCount == candidatePropsCount && fieldPropsCount > 0) {
-                                                    itemType = toJavaClassName(schemaEntry.getKey());
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // If still not found, use getJavaType (handles other cases)
-                    if (itemType == null || itemType.isEmpty()) {
-                        itemType = getJavaType(fieldSchema);
-                        // If getJavaType returns "Object" but we have a $ref, try manual resolution again
-                        if ("Object".equals(itemType) && fieldSchema.containsKey("$ref")) {
-                            String ref = (String) fieldSchema.get("$ref");
-                            if (ref != null && ref.startsWith("#/components/schemas/")) {
-                                String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
-                                itemType = toJavaClassName(schemaRef);
-                            }
-                        }
-                    }
-                }
-                if (itemType == null || itemType.isEmpty()) {
-                    itemType = "Object";
-                }
-                fieldType = "List<" + itemType + ">";
-            } else {
-                fieldType = getJavaType(fieldSchema);
-            }
-            
+            String fieldType = computeFieldTypeForProperty(fieldName, fieldSchema, isArrayType, spec);
+
             String javaFieldName = toCamelCase(fieldName);
             String capitalizedFieldName = capitalize(javaFieldName);
 
@@ -2844,6 +2697,99 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         return segment;
     }
 
+    /** Types that do not require a model import (primitives, java/javax types, current class). */
+    private static final Set<String> MODEL_IMPORT_EXCLUDES = Set.of(
+        "Object", "String", "Integer", "Boolean", "Long", "Double", "Float",
+        "List", "Map", "XMLGregorianCalendar", "JAXBElement", "QName");
+
+    /**
+     * Add referenced model type names from a field type string to the given set.
+     * Skips excluded types and the current schema name.
+     */
+    private void addModelImportTypes(String fieldType, String currentSchemaName, Set<String> modelImports) {
+        if (fieldType == null || fieldType.isEmpty()) return;
+        if (fieldType.startsWith("List<")) {
+            int start = fieldType.indexOf('<') + 1;
+            int end = fieldType.lastIndexOf('>');
+            if (start > 0 && end > start) {
+                String inner = fieldType.substring(start, end).trim();
+                if (!MODEL_IMPORT_EXCLUDES.contains(inner) && !inner.equals(currentSchemaName)) {
+                    modelImports.add(inner);
+                }
+            }
+        } else {
+            if (!MODEL_IMPORT_EXCLUDES.contains(fieldType) && !fieldType.equals(currentSchemaName)) {
+                modelImports.add(fieldType);
+            }
+        }
+    }
+
+    /**
+     * Compute the Java field type for a property (same logic as in generateModel field loop).
+     */
+    private String computeFieldTypeForProperty(String fieldName, Map<String, Object> fieldSchema, boolean isArrayType, Map<String, Object> spec) {
+        if (isArrayType && "items".equals(fieldName)) {
+            String itemType = null;
+            if (fieldSchema != null) {
+                if (fieldSchema.containsKey("$ref")) {
+                    String ref = (String) fieldSchema.get("$ref");
+                    if (ref != null && ref.startsWith("#/components/schemas/")) {
+                        String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
+                        itemType = toJavaClassName(schemaRef);
+                    }
+                }
+                if (itemType == null || itemType.isEmpty()) {
+                    Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+                    if (components != null) {
+                        Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+                        if (schemas != null && fieldSchema != null) {
+                            for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
+                                Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                if (candidateSchema == fieldSchema) {
+                                    itemType = toJavaClassName(schemaEntry.getKey());
+                                    break;
+                                }
+                            }
+                            if (itemType == null || itemType.isEmpty()) {
+                                Object fieldTypeObj = fieldSchema.get("type");
+                                Object fieldProperties = fieldSchema.get("properties");
+                                for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
+                                    Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
+                                    if (candidateSchema != null) {
+                                        Object candidateType = candidateSchema.get("type");
+                                        if (fieldTypeObj != null && fieldTypeObj.equals(candidateType)) {
+                                            Map<String, Object> candidateProperties = Util.asStringObjectMap(candidateSchema.get("properties"));
+                                            int fieldPropsCount = (fieldProperties != null) ? ((Map<?, ?>) fieldProperties).size() : 0;
+                                            int candidatePropsCount = (candidateProperties != null) ? candidateProperties.size() : 0;
+                                            if (fieldPropsCount == candidatePropsCount && fieldPropsCount > 0) {
+                                                itemType = toJavaClassName(schemaEntry.getKey());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (itemType == null || itemType.isEmpty()) {
+                    itemType = getJavaType(fieldSchema);
+                    if ("Object".equals(itemType) && fieldSchema.containsKey("$ref")) {
+                        String ref = (String) fieldSchema.get("$ref");
+                        if (ref != null && ref.startsWith("#/components/schemas/")) {
+                            itemType = toJavaClassName(ref.substring(ref.lastIndexOf("/") + 1));
+                        }
+                    }
+                }
+            }
+            if (itemType == null || itemType.isEmpty()) {
+                itemType = "Object";
+            }
+            return "List<" + itemType + ">";
+        }
+        return getJavaType(fieldSchema);
+    }
+
     /** Max recursion depth for mergeSchemaProperties to prevent StackOverflow on large specs. */
     private static final int MAX_MERGE_SCHEMA_DEPTH = 15;
 
@@ -3101,7 +3047,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         enumPattern.append(enumValue);
                     }
                     enumPattern.append(")$");
-                    annotations.append("@Pattern(regexp = \"").append(enumPattern).append("\")\n    ");
+                    // Escape for Java string literal (backslashes and quotes)
+                    String enumPatternStr = enumPattern.toString().replace("\\", "\\\\").replace("\"", "\\\"");
+                    annotations.append("@Pattern(regexp = \"").append(enumPatternStr).append("\")\n    ");
                 }
 
                 // Pattern validation (only if enum is not present, as enum takes precedence)
@@ -3109,8 +3057,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     Object patternObj = schema.get("pattern");
                     if (patternObj != null) {
                         String pattern = patternObj.toString();
-                        // Escape backslashes and quotes in pattern for Java string
-                        pattern = pattern.replace("\\", "\\\\").replace("\"", "\\\"");
+                        // Escape backslashes and quotes for Java string; escape parentheses for regex literal
+                        pattern = pattern.replace("\\", "\\\\").replace("\"", "\\\"").replace("(", "\\(").replace(")", "\\)");
                         annotations.append("@Pattern(regexp = \"").append(pattern).append("\")\n    ");
                     }
                 }
@@ -3448,6 +3396,27 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (ref != null && ref.startsWith("#/components/schemas/")) {
             String schemaRef = ref.substring(ref.lastIndexOf("/") + 1);
             return toJavaClassName(schemaRef);
+        }
+
+        // x-resolved-ref (parser may set when $ref was resolved, e.g. from external file merge)
+        String refSchemaName = getSchemaNameFromRef(schema);
+        if (refSchemaName != null) {
+            return toJavaClassName(refSchemaName);
+        }
+
+        // External file $ref (e.g. ./UserDirectReports.yaml) - derive name and use if schema exists in spec
+        if (ref != null && (ref.endsWith(".yaml") || ref.endsWith(".yml") || ref.endsWith(".json"))) {
+            String externalSchemaName = deriveSchemaNameFromExternalRef(ref);
+            if (externalSchemaName != null) {
+                Map<String, Object> spec = currentSpecForResolution.get();
+                if (spec != null) {
+                    Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+                    Map<String, Object> schemas = components != null ? Util.asStringObjectMap(components.get("schemas")) : null;
+                    if (schemas != null && schemas.containsKey(externalSchemaName)) {
+                        return toJavaClassName(externalSchemaName);
+                    }
+                }
+            }
         }
 
         String type = (String) schema.get("type");

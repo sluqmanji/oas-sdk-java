@@ -54,21 +54,21 @@ public class OASSDKCLI implements Callable<Integer> {
         @Option(names = {"-c", "--config"}, description = "Configuration file")
         private String config;
 
+        @Option(names = {"-s", "--search-path"}, split = ",",
+                description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
+        private List<String> searchPaths;
+
         @Override
         public Integer call() {
             try {
-                // Load configuration if provided
-                GeneratorConfig generatorConfig = null;
-                if (config != null) {
-                    // Configuration loading from file is not yet implemented
-                    // For now, use command line parameters to build configuration
-                    generatorConfig = GeneratorConfig.builder()
-                            .language(language)
-                            .framework(framework)
-                            .packageName(packageName)
-                            .outputDir(output)
-                            .build();
-                }
+                // Build configuration from CLI params (config file loading not yet implemented)
+                GeneratorConfig generatorConfig = GeneratorConfig.builder()
+                        .language(language)
+                        .framework(framework)
+                        .packageName(packageName)
+                        .outputDir(output)
+                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
+                        .build();
 
                 // Initialize SDK
                 OASSDK sdk = new OASSDK(generatorConfig, null, null);
