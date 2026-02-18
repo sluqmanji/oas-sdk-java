@@ -676,11 +676,11 @@ public class OASParser {
         }
 
         boolean mergeAll = referencedFragments == null || referencedFragments.isEmpty() || referencedFragments.contains(REF_FRAGMENT_WHOLE_FILE);
-        // When file was referenced via a non-schema fragment (e.g. requestBodies, responses), merge all schemas
-        // so that schemas only referenced inside that fragment (e.g. requestBody content schema) are included
+        // When file was referenced via a non-schema fragment (e.g. parameters, requestBodies, responses), merge all schemas
+        // so that internal refs like #/components/schemas/UserView in the main spec can resolve (e.g. from common.yaml)
         if (!mergeAll && referencedFragments != null) {
             for (String p : referencedFragments) {
-                if (p.startsWith("/components/requestBodies/") || p.startsWith("/components/responses/")) {
+                if (p.startsWith("/components/parameters/") || p.startsWith("/components/requestBodies/") || p.startsWith("/components/responses/")) {
                     mergeAll = true;
                     break;
                 }

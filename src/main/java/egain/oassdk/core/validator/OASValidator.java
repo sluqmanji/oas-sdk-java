@@ -77,10 +77,10 @@ public class OASValidator {
             errors.add("Info section missing required 'version' field");
         }
 
-        // Validate version format
+        // Validate version format when present and non-blank (blank is allowed)
         if (info.containsKey("version")) {
             String version = (String) info.get("version");
-            if (version != null && !VERSION_PATTERN.matcher(version).matches()) {
+            if (version != null && !version.isBlank() && !VERSION_PATTERN.matcher(version).matches()) {
                 errors.add("Invalid version format in info section: " + version);
             }
         }
