@@ -196,12 +196,12 @@ public class PathResolver {
         if (currentRecursionDepth.get() < MAX_RECURSION_DEPTH) {
             for (Path searchPath : searchPaths) {
                 try {
-                    // First try with full path
+                    // First try with full path (e.g. models/v4/User.yaml)
                     Path foundPath = findFileRecursively(sanitizedPath, searchPath);
-                    if (foundPath == null && (sanitizedPath.contains("../") || sanitizedPath.contains("..\\"))) {
-                        // If path has ../, try searching for just the filename
+                    // If not found, try with just the filename (e.g. ./UserView.yaml -> UserView.yaml)
+                    if (foundPath == null) {
                         String fileName = Paths.get(sanitizedPath).getFileName().toString();
-                        if (fileName != null && !fileName.isEmpty()) {
+                        if (fileName != null && !fileName.isEmpty() && !fileName.equals(sanitizedPath)) {
                             foundPath = findFileRecursively(fileName, searchPath);
                         }
                     }

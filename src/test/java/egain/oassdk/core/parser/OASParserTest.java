@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -326,6 +327,73 @@ public class OASParserTest {
         Map<String, Object> userSchema = Util.asStringObjectMap(schemas.get("User"));
         assertNotNull(userSchema);
         assertTrue(userSchema.containsKey("properties"));
+    }
+
+    @Test
+    public void testResolveReferencesMergesSchemaFromExternalRequestBodyFragment(@TempDir Path tempDir) throws IOException, OASSDKException {
+        // Main spec references external file fragment: requestBodies/UserEditRequestBody.
+        // That requestBody has content.application/json.schema.$ref: '#/components/schemas/UserEditRequest'.
+        // Parser must merge UserEditRequest into main spec so generators can generate the model.
+        Path modelsV4 = tempDir.resolve("models").resolve("v4");
+        Files.createDirectories(modelsV4);
+
+        String userYaml = """
+            openapi: 3.0.0
+            info:
+              title: User models
+              version: 1.0.0
+            components:
+              schemas:
+                UserEditRequest:
+                  type: object
+                  description: Schema for editing a user
+                  properties:
+                    id:
+                      type: string
+                User:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+              requestBodies:
+                UserEditRequestBody:
+                  required: true
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/UserEditRequest'
+            """;
+        Files.writeString(modelsV4.resolve("User.yaml"), userYaml);
+
+        String apiYaml = """
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /user:
+                patch:
+                  operationId: editUser
+                  requestBody:
+                    $ref: 'models/v4/User.yaml#/components/requestBodies/UserEditRequestBody'
+                  responses:
+                    '204':
+                      description: No content
+            """;
+        Path apiPath = tempDir.resolve("api.yaml");
+        Files.writeString(apiPath, apiYaml);
+
+        OASParser parserWithSearch = new OASParser(List.of(tempDir.toString()));
+        Map<String, Object> spec = parserWithSearch.parse(apiPath.toString());
+        Map<String, Object> resolved = parserWithSearch.resolveReferences(spec, apiPath.toString());
+
+        assertNotNull(resolved);
+        Map<String, Object> components = Util.asStringObjectMap(resolved.get("components"));
+        assertNotNull(components, "components should exist");
+        Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+        assertNotNull(schemas, "schemas should exist");
+        assertTrue(schemas.containsKey("UserEditRequest"),
+                "UserEditRequest schema must be merged when referenced via external requestBody fragment");
     }
 }
 
