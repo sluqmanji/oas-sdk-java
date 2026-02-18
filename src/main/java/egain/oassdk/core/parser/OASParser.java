@@ -230,28 +230,36 @@ public class OASParser {
         // Track visited objects to prevent infinite recursion
         // Use IdentityHashMap-based set to avoid hashCode() issues with circular references
         Set<Object> visitedObjects = Collections.newSetFromMap(new IdentityHashMap<>());
+        // Track which fragment(s) of each external file were referenced (e.g. /components/parameters/accept).
+        // Key = file key (same as loadedFiles), value = set of JSON paths. Sentinel "/" = whole file referenced.
+        Map<String, Set<String>> referencedFragmentsByFile = new HashMap<>();
 
         // Resolve all references recursively
-        resolveReferencesRecursive(resolvedSpec, basePath.getParent(), baseFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+        resolveReferencesRecursive(resolvedSpec, basePath.getParent(), baseFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
 
         // After all references are resolved, merge external schemas into the main spec
         // This allows generators to find and generate models from external files
         Map<String, Object> mainSpec = loadedFiles.get(baseFileKey);
         for (Map.Entry<String, Map<String, Object>> entry : loadedFiles.entrySet()) {
             if (!entry.getKey().equals(baseFileKey) && entry.getValue() != mainSpec) {
-                mergeExternalSchemasIntoMainSpec(entry.getKey(), entry.getValue(), mainSpec);
+                Set<String> referencedFragments = referencedFragmentsByFile.get(entry.getKey());
+                mergeExternalSchemasIntoMainSpec(entry.getKey(), entry.getValue(), mainSpec, referencedFragments);
             }
         }
 
         return resolvedSpec;
     }
 
+    /** Sentinel in referencedFragmentsByFile meaning the entire file was referenced (e.g. ref without fragment). */
+    private static final String REF_FRAGMENT_WHOLE_FILE = "/";
+
     /**
      * Recursively resolve $ref references in the specification
      * @param baseFileKey key of the main spec in loadedFiles (for registering resolved external schemas)
      */
     private void resolveReferencesRecursive(Object obj, Path baseDir, String currentFileKey, String baseFileKey,
-                                            Map<String, Map<String, Object>> loadedFiles, Set<String> resolvingRefs, Set<Object> visitedObjects) throws OASSDKException {
+                                            Map<String, Map<String, Object>> loadedFiles, Set<String> resolvingRefs, Set<Object> visitedObjects,
+                                            Map<String, Set<String>> referencedFragmentsByFile) throws OASSDKException {
         if (obj == null) {
             return;
         }
@@ -293,7 +301,7 @@ public class OASParser {
                 resolvingRefs.add(refKey);
 
                 try {
-                    Object resolved = resolveReference(ref, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                    Object resolved = resolveReference(ref, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
 
                     // Replace the map with resolved content
                     if (resolved instanceof Map) {
@@ -321,8 +329,29 @@ public class OASParser {
                         if (ref != null && ref.startsWith("#/components/schemas/")) {
                             map.put("x-resolved-ref", ref);
                         } else if (isExternalFileRef && ref != null) {
-                            // For external file refs, set x-resolved-ref so generators emit type refs and imports
-                            String schemaName = deriveSchemaNameFromRef(ref);
+                            // For external file refs, set x-resolved-ref so generators emit type refs and imports.
+                            // Prefer schema name from fragment (e.g. common.yaml#/components/schemas/L10NString -> L10NString).
+                            String schemaName = null;
+                            if (ref.contains("#/components/schemas/")) {
+                                String fragment = ref.substring(ref.indexOf("#/components/schemas/") + "#/components/schemas/".length());
+                                schemaName = fragment.contains("/") ? fragment.substring(fragment.lastIndexOf("/") + 1) : fragment;
+                            }
+                            if (schemaName == null || schemaName.isEmpty()) {
+                                schemaName = deriveSchemaNameFromRef(ref);
+                            }
+                            if (schemaName != null && !schemaName.isEmpty()) {
+                                map.put("x-resolved-ref", "#/components/schemas/" + schemaName);
+                            }
+                        } else if (ref != null && ref.contains("#/components/schemas/")) {
+                            // External ref with fragment (e.g. common.yaml#/components/schemas/L10NString) that did not
+                            // match isExternalFileRef (ref does not end with .yaml). Set x-resolved-ref so generators
+                            // can emit the correct type (e.g. for property-level allOf single-ref).
+                            String schemaName = null;
+                            String fragment = ref.substring(ref.indexOf("#/components/schemas/") + "#/components/schemas/".length());
+                            schemaName = fragment.contains("/") ? fragment.substring(fragment.lastIndexOf("/") + 1) : fragment;
+                            if (schemaName == null || schemaName.isEmpty()) {
+                                schemaName = deriveSchemaNameFromRef(ref);
+                            }
                             if (schemaName != null && !schemaName.isEmpty()) {
                                 map.put("x-resolved-ref", "#/components/schemas/" + schemaName);
                             }
@@ -337,7 +366,7 @@ public class OASParser {
 
                         // Recursively resolve any references in the resolved content
                         // Note: We keep refKey in resolvingRefs to detect circular references in nested content
-                        resolveReferencesRecursive(map, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                        resolveReferencesRecursive(map, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
                     } else {
                         // If resolved is not a map, this shouldn't happen for parameters
                         throw new OASSDKException("Resolved reference is not a Map: " + ref);
@@ -369,14 +398,14 @@ public class OASParser {
                         }
                     }
                 }
-                resolveReferencesRecursive(value, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                resolveReferencesRecursive(value, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
             }
         } else if (obj instanceof List) {
             List<Object> list = Util.asObjectList(obj);
             // Mark list as visited
             visitedObjects.add(list);
             for (Object o : list) {
-                resolveReferencesRecursive(o, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                resolveReferencesRecursive(o, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
             }
         }
     }
@@ -478,11 +507,58 @@ public class OASParser {
         return segment;
     }
 
+    /** Max depth for collectSchemaRefPaths to avoid stack overflow on deep or cyclic structures. */
+    private static final int COLLECT_SCHEMA_REFS_MAX_DEPTH = 100;
+
+    /**
+     * Collect all JSON paths of $ref that point to #/components/schemas/... from the given object (transitively).
+     * Used so that when we reference a fragment (e.g. requestBodies/X), we also record schema refs used inside it
+     * and merge those schemas into the main spec before resolution continues.
+     *
+     * @param obj      root object to traverse (Map, List, or other)
+     * @param outPaths set to add paths to (e.g. "/components/schemas/UserEditRequest"); paths use leading slash
+     */
+    private void collectSchemaRefPaths(Object obj, Set<String> outPaths) {
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        collectSchemaRefPaths(obj, outPaths, visited, 0);
+    }
+
+    private void collectSchemaRefPaths(Object obj, Set<String> outPaths, Set<Object> visited, int depth) {
+        if (obj == null || depth > COLLECT_SCHEMA_REFS_MAX_DEPTH) {
+            return;
+        }
+        if (visited.contains(obj)) {
+            return;
+        }
+        if (obj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) obj;
+            visited.add(obj);
+            if (map.containsKey("$ref")) {
+                String ref = (String) map.get("$ref");
+                if (ref != null && ref.startsWith("#/components/schemas/")) {
+                    String path = ref.startsWith("#/") ? "/" + ref.substring(2) : (ref.startsWith("/") ? ref : "/" + ref);
+                    outPaths.add(path);
+                }
+            }
+            for (Object value : map.values()) {
+                collectSchemaRefPaths(value, outPaths, visited, depth + 1);
+            }
+            return;
+        }
+        if (obj instanceof List) {
+            visited.add(obj);
+            for (Object item : (List<?>) obj) {
+                collectSchemaRefPaths(item, outPaths, visited, depth + 1);
+            }
+        }
+    }
+
     /**
      * Resolve a single $ref reference
      * @param baseFileKey key of the main spec in loadedFiles (for recursive resolution)
      */
-    private Object resolveReference(String ref, Path baseDir, String currentFileKey, String baseFileKey, Map<String, Map<String, Object>> loadedFiles, Set<String> resolvingRefs, Set<Object> visitedObjects) throws OASSDKException {
+    private Object resolveReference(String ref, Path baseDir, String currentFileKey, String baseFileKey, Map<String, Map<String, Object>> loadedFiles, Set<String> resolvingRefs, Set<Object> visitedObjects, Map<String, Set<String>> referencedFragmentsByFile) throws OASSDKException {
         if (ref == null || ref.isEmpty()) {
             throw new OASSDKException("Empty $ref reference");
         }
@@ -508,14 +584,33 @@ public class OASParser {
                     loadedFiles.put(fileKey, externalSpec);
                     // Resolve references in the external file recursively
                     // Share the same resolving set to detect cross-file circular references
-                    resolveReferencesRecursive(externalSpec, refPath.getParent(), fileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                    resolveReferencesRecursive(externalSpec, refPath.getParent(), fileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
                 }
 
+                // Record which fragment of this file was referenced (for merge-only-referenced-fragments)
+                String normalizedPath;
+                if (jsonPath != null && !jsonPath.isEmpty() && !"/".equals(jsonPath)) {
+                    normalizedPath = jsonPath.startsWith("/") ? jsonPath : "/" + jsonPath;
+                } else {
+                    normalizedPath = REF_FRAGMENT_WHOLE_FILE;
+                }
+                referencedFragmentsByFile.computeIfAbsent(fileKey, k -> new HashSet<>()).add(normalizedPath);
+
                 // Resolve the JSON path in the external file
-                if (jsonPath.isEmpty() || jsonPath.equals("/")) {
+                if (jsonPath == null || jsonPath.isEmpty() || "/".equals(jsonPath)) {
                     return externalSpec;
                 } else {
-                    return resolveJsonPath(externalSpec, jsonPath);
+                    Object fragment = resolveJsonPath(externalSpec, jsonPath);
+                    // Record transitive schema refs from this fragment so they get merged (e.g. requestBody -> schema)
+                    Set<String> schemaRefPaths = new HashSet<>();
+                    collectSchemaRefPaths(fragment, schemaRefPaths);
+                    referencedFragmentsByFile.computeIfAbsent(fileKey, k -> new HashSet<>()).addAll(schemaRefPaths);
+                    // Merge this file into main spec now so internal refs (e.g. #/components/schemas/UserEditRequest) resolve
+                    Map<String, Object> mainSpec = loadedFiles.get(baseFileKey);
+                    if (mainSpec != null) {
+                        mergeExternalSchemasIntoMainSpec(fileKey, externalSpec, mainSpec, referencedFragmentsByFile.get(fileKey));
+                    }
+                    return fragment;
                 }
             } else {
                 // Internal reference (same file) - use currentFileKey to get the correct spec
@@ -541,8 +636,11 @@ public class OASParser {
                     externalSpec = parse(refPath.toString());
                     externalSpec = new HashMap<>(externalSpec);
                     loadedFiles.put(fileKey, externalSpec);
-                    resolveReferencesRecursive(externalSpec, refPath.getParent(), fileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects);
+                    resolveReferencesRecursive(externalSpec, refPath.getParent(), fileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
                 }
+
+                // Whole-file ref: record sentinel so merge keeps full-file behavior
+                referencedFragmentsByFile.computeIfAbsent(fileKey, k -> new HashSet<>()).add(REF_FRAGMENT_WHOLE_FILE);
                 
                 // IMPORTANT: If the external file is a schema definition (not a full OpenAPI spec),
                 // it will have type/properties directly. Return it as-is.
@@ -563,18 +661,39 @@ public class OASParser {
 
     /**
      * Merge external schemas into the main spec's components/schemas section
-     * This allows generators to find and generate models from external files
+     * This allows generators to find and generate models from external files.
+     * When referencedFragments is non-null and does not contain the whole-file sentinel,
+     * only components whose paths were referenced are merged (e.g. only schema X if
+     * "/components/schemas/X" was referenced).
      *
      * @param fileKey the file path key (e.g. from loadedFiles) used to derive schema name when title is absent
+     * @param referencedFragments set of JSON paths that were referenced in this file (e.g. /components/parameters/accept).
+     *                            Null or empty = merge all (backward compatible). Contains REF_FRAGMENT_WHOLE_FILE = merge all.
      */
-    private void mergeExternalSchemasIntoMainSpec(String fileKey, Map<String, Object> externalSpec, Map<String, Object> mainSpec) {
+    private void mergeExternalSchemasIntoMainSpec(String fileKey, Map<String, Object> externalSpec, Map<String, Object> mainSpec, Set<String> referencedFragments) {
         if (externalSpec == null || mainSpec == null) {
             return;
+        }
+
+        boolean mergeAll = referencedFragments == null || referencedFragments.isEmpty() || referencedFragments.contains(REF_FRAGMENT_WHOLE_FILE);
+        // When file was referenced via a non-schema fragment (e.g. requestBodies, responses), merge all schemas
+        // so that schemas only referenced inside that fragment (e.g. requestBody content schema) are included
+        if (!mergeAll && referencedFragments != null) {
+            for (String p : referencedFragments) {
+                if (p.startsWith("/components/requestBodies/") || p.startsWith("/components/responses/")) {
+                    mergeAll = true;
+                    break;
+                }
+            }
         }
 
         // Check if externalSpec is a schema definition file (not a full OpenAPI spec)
         // Schema definition files have type/properties directly, not wrapped in components/schemas
         if (externalSpec.containsKey("type") || externalSpec.containsKey("properties")) {
+            // Only merge whole-file schema definition if the file was referenced as a whole
+            if (!mergeAll) {
+                return;
+            }
             // This is a schema definition file - merge it as a schema.
             // Use stable name from file path (e.g. User.yaml -> "User", Users.yaml -> "Users")
             // so that the correct schema always wins (full User from User.yaml, not inlined placeholder).
@@ -640,10 +759,12 @@ public class OASParser {
         // the external file is the canonical source (e.g. full User from User.yaml wins over a wrong main entry).
         String fileDerivedSchemaName = (fileKey != null && !fileKey.isEmpty()) ? deriveSchemaNameFromRef(fileKey) : null;
 
-        // Merge external schemas into main schemas. Add if not present; overwrite when schema name
-        // matches the current file's derived name so that the definition from this file wins.
+        // Merge external schemas into main schemas. When mergeAll is false, only merge schemas whose path was referenced.
         for (Map.Entry<String, Object> schemaEntry : externalSchemas.entrySet()) {
             String schemaName = schemaEntry.getKey();
+            if (!mergeAll && (referencedFragments == null || !isSchemaPathReferenced(referencedFragments, schemaName))) {
+                continue;
+            }
             boolean overwrite = fileDerivedSchemaName != null && fileDerivedSchemaName.equals(schemaName);
             if (overwrite || !mainSchemas.containsKey(schemaName)) {
                 // Create a copy to avoid modifying the original
@@ -660,6 +781,15 @@ public class OASParser {
                 }
             }
         }
+    }
+
+    /**
+     * Check if a schema name was referenced (accepts both /components/schemas/Name and //components/schemas/Name).
+     */
+    private static boolean isSchemaPathReferenced(Set<String> referencedFragments, String schemaName) {
+        if (referencedFragments == null) return false;
+        String path = "/components/schemas/" + schemaName;
+        return referencedFragments.contains(path) || referencedFragments.contains("/" + path);
     }
 
     /**

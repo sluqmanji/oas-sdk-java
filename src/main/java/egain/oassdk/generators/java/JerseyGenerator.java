@@ -802,9 +802,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     }
 
     /**
-     * Collect inline object schemas from schema properties
+     * Collect inline object schemas from schema properties.
+     * When referencedSchemaNames is non-null, only collects from those top-level schemas (avoids phantom InlineObject classes).
      */
-    private void collectInlinedSchemasFromProperties(Map<String, Object> schemas, Map<String, Object> spec) {
+    private void collectInlinedSchemasFromProperties(Map<String, Object> schemas, Map<String, Object> spec, Set<String> referencedSchemaNames) {
         if (schemas == null) return;
 
         // Track visited schemas to prevent infinite recursion (using IdentityHashSet for identity-based comparison)
@@ -819,6 +820,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
 
         for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
+            // When referenced set is provided, only collect inlines from referenced top-level schemas
+            if (referencedSchemaNames != null && !referencedSchemaNames.contains(schemaEntry.getKey())) {
+                continue;
+            }
             Map<String, Object> schema = Util.asStringObjectMap(schemaEntry.getValue());
             if (schema == null) continue;
 
@@ -1010,8 +1015,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
     /**
      * Generate models
-     * Generates all models from the schemas section, not just referenced ones
-     * Skips schemas that are only used via allOf/oneOf/anyOf in other schemas
+     * Generates only schemas that are referenced (directly or transitively) from paths or components.
+     * Skips schemas that are only used via allOf/oneOf/anyOf in other schemas.
      */
     private void generateModels(Map<String, Object> spec, String outputDir, String packageName) throws IOException {
         Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
@@ -1022,27 +1027,43 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         String packagePath = packageName != null ? packageName : "com.example.api";
 
+        // Collect all schema names referenced from paths (responses, requestBody, parameters) and components
+        Set<String> allReferencedNames = new java.util.HashSet<>();
+        try {
+            allReferencedNames = collectAllReferencedSchemaNames(spec);
+        } catch (StackOverflowError e) {
+            logger.warning("StackOverflow in collectAllReferencedSchemaNames, continuing with empty set");
+        }
+        // Fallback: when few or no refs were found, generate all schemas to avoid "very few models"
+        int refCount = allReferencedNames.size();
+        int schemaCount = schemas.size();
+        boolean useFallback = refCount == 0
+                || (schemaCount > 0 && refCount < schemaCount * 0.5)
+                || (schemaCount > 10 && refCount < 10);
+        if (useFallback) {
+            allReferencedNames = new HashSet<>(schemas.keySet());
+            logger.info("Few or no schema references found from paths/components; generating all schemas");
+        }
+
         // Collect schemas that are only used via allOf/oneOf/anyOf
         Set<String> compositionOnlySchemas = collectCompositionOnlySchemas(schemas);
 
-        // Collect inline object schemas from schema properties
-        collectInlinedSchemasFromProperties(schemas, spec);
+        // Collect inline object schemas only from referenced top-level schemas
+        collectInlinedSchemasFromProperties(schemas, spec, allReferencedNames);
 
-        // Collect schemas referenced in components/responses
-        // Wrap in try-catch to handle StackOverflow gracefully for very large specs
-        Set<String> referencedInResponses = new java.util.HashSet<>();
-        try {
-            referencedInResponses = collectSchemasReferencedInResponses(spec);
-        } catch (StackOverflowError e) {
-            logger.warning("StackOverflow in collectSchemasReferencedInResponses, continuing with empty set");
-            // Continue with empty set - some schemas might not be generated, but at least we won't crash
-        }
+        // Set of top-level class names we generate (for ObjectFactory / jaxb.index)
+        Set<String> generatedTopLevelClassNames = new HashSet<>();
 
-        // Generate all models from schemas section
+        // Generate only referenced top-level schemas
         for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
             String schemaName = schemaEntry.getKey();
             Map<String, Object> schema = Util.asStringObjectMap(schemaEntry.getValue());
             if (schema == null) continue;
+
+            // Skip schemas not referenced from paths or components
+            if (!allReferencedNames.contains(schemaName)) {
+                continue;
+            }
 
             // Filter out error schemas
             if (isErrorSchema(schemaName)) {
@@ -1069,14 +1090,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     schema.containsKey("enum");
 
             // If it's a simple type (string, integer, etc.) without structure, skip it
-            // EXCEPT if it's an array type that's referenced in responses (needs a wrapper class)
+            // EXCEPT if it's an array type that's referenced (needs a wrapper class)
             if (!hasStructure && schema.containsKey("type")) {
                 Object type = schema.get("type");
                 if (type instanceof String) {
                     String typeStr = (String) type;
-                    // Don't skip array types that are referenced in responses
-                    if ("array".equals(typeStr) && referencedInResponses.contains(schemaName)) {
-                        // Generate model for array type that's referenced in responses
+                    // Don't skip array types that are referenced
+                    if ("array".equals(typeStr) && allReferencedNames.contains(schemaName)) {
+                        // Generate model for array type that's referenced
                     } else if (!"object".equals(typeStr)) {
                         // Skip simple primitives without any structure
                         continue;
@@ -1087,6 +1108,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // Convert schema name to valid Java class name
             String javaClassName = toJavaClassName(schemaName);
 
+            generatedTopLevelClassNames.add(javaClassName);
             generateModel(javaClassName, schema, outputDir, packagePath, spec);
         }
 
@@ -1104,11 +1126,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         // Generate JAXBBean interface
         generateJAXBBeanInterface(outputDir, packagePath);
 
-        // Generate ObjectFactory for JAXB support
-        generateObjectFactory(schemas, outputDir, packagePath);
-
-        // Generate jaxb.index for JAXB package discovery
-        generateJaxbIndex(schemas, outputDir, packagePath);
+        // Generate ObjectFactory and jaxb.index for generated models only
+        generateObjectFactory(generatedTopLevelClassNames, outputDir, packagePath);
+        generateJaxbIndex(generatedTopLevelClassNames, outputDir, packagePath);
     }
 
     /**
@@ -1151,10 +1171,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     }
 
     /**
-     * Generate ObjectFactory class for JAXB support
+     * Generate ObjectFactory class for JAXB support (only for generated top-level + inlined models).
      */
-    private void generateObjectFactory(Map<String, Object> schemas, String outputDir, String packagePath) throws IOException {
-        Set<String> generatedClasses = collectJaxbModelClassNames(schemas);
+    private void generateObjectFactory(Set<String> generatedTopLevelClassNames, String outputDir, String packagePath) throws IOException {
+        Set<String> generatedClasses = collectJaxbModelClassNames(generatedTopLevelClassNames);
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".model;\n\n");
@@ -1183,8 +1203,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      * Generate jaxb.index file for JAXB package-based context discovery.
      * Lists all generated model class names (one per line) so JAXB can discover them.
      */
-    private void generateJaxbIndex(Map<String, Object> schemas, String outputDir, String packagePath) throws IOException {
-        Set<String> classNames = collectJaxbModelClassNames(schemas);
+    private void generateJaxbIndex(Set<String> generatedTopLevelClassNames, String outputDir, String packagePath) throws IOException {
+        Set<String> classNames = collectJaxbModelClassNames(generatedTopLevelClassNames);
         String indexContent = String.join("\n", classNames);
         String modelDir = outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/model";
         writeFile(modelDir + "/jaxb.index", indexContent);
@@ -1192,40 +1212,11 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
     /**
      * Collect the set of JAXB model class names (same set used for ObjectFactory and jaxb.index).
+     * Returns generated top-level class names plus inlined schema class names.
      */
-    private Set<String> collectJaxbModelClassNames(Map<String, Object> schemas) {
-        Set<String> generatedClasses = new HashSet<>();
-
-        // Add all top-level schemas
-        for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-            String schemaName = schemaEntry.getKey();
-            Map<String, Object> schema = Util.asStringObjectMap(schemaEntry.getValue());
-            if (schema == null) continue;
-
-            if (isErrorSchema(schemaName)) {
-                continue;
-            }
-
-            boolean hasStructure = schema.containsKey("properties") ||
-                    schema.containsKey("allOf") ||
-                    schema.containsKey("oneOf") ||
-                    schema.containsKey("anyOf") ||
-                    schema.containsKey("enum");
-
-            if (!hasStructure && schema.containsKey("type")) {
-                Object type = schema.get("type");
-                if (type instanceof String && !"object".equals(type)) {
-                    continue;
-                }
-            }
-
-            String javaClassName = toJavaClassName(schemaName);
-            generatedClasses.add(javaClassName);
-        }
-
-        // Add inlined schemas
+    private Set<String> collectJaxbModelClassNames(Set<String> generatedTopLevelClassNames) {
+        Set<String> generatedClasses = new HashSet<>(generatedTopLevelClassNames);
         generatedClasses.addAll(inlinedSchemas.values());
-
         return generatedClasses;
     }
 
@@ -1450,8 +1441,67 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         }
                     }
                 }
+                return;
+            }
+            // External $ref (e.g. models/v4/User.yaml): derive name and add if that schema exists in components/schemas
+            if (ref != null && depth < 15) {
+                String derivedName = deriveSchemaNameFromExternalRef(ref);
+                if (derivedName != null) {
+                    components = Util.asStringObjectMap(spec.get("components"));
+                    if (components != null) {
+                        Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+                        if (schemas != null && schemas.containsKey(derivedName)) {
+                            if (!referencedSchemas.contains(derivedName)) {
+                                referencedSchemas.add(derivedName);
+                                Map<String, Object> referencedSchema = Util.asStringObjectMap(schemas.get(derivedName));
+                                if (referencedSchema != null && !visited.containsKey(referencedSchema)) {
+                                    visited.put(referencedSchema, Boolean.TRUE);
+                                    if (referencedSchema.containsKey("type") && "array".equals(referencedSchema.get("type"))) {
+                                        Object items = referencedSchema.get("items");
+                                        if (items != null) {
+                                            collectSchemasFromSchemaObject(items, referencedSchemas, spec, visited, depth + 1);
+                                        }
+                                    } else {
+                                        collectSchemasFromSchemaObject(referencedSchema, referencedSchemas, spec, visited, depth + 1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             return;
+        }
+
+        // Identity match: parser may resolve $ref in place so this schema is the same Map instance as components/schemas/X (no $ref or x-resolved-ref on root)
+        if (depth < 15) {
+            Map<String, Object> componentsForIdentity = Util.asStringObjectMap(spec.get("components"));
+            if (componentsForIdentity != null) {
+                Map<String, Object> schemasMap = Util.asStringObjectMap(componentsForIdentity.get("schemas"));
+                if (schemasMap != null) {
+                    for (Map.Entry<String, Object> schemaEntry : schemasMap.entrySet()) {
+                        if (schemaEntry.getValue() == schema) {
+                            String schemaName = schemaEntry.getKey();
+                            if (!referencedSchemas.contains(schemaName)) {
+                                referencedSchemas.add(schemaName);
+                                if (visited.containsKey(schema)) {
+                                    return;
+                                }
+                                visited.put(schema, Boolean.TRUE);
+                                if (schema.containsKey("type") && "array".equals(schema.get("type"))) {
+                                    Object items = schema.get("items");
+                                    if (items != null) {
+                                        collectSchemasFromSchemaObject(items, referencedSchemas, spec, visited, depth + 1);
+                                    }
+                                } else {
+                                    collectSchemasFromSchemaObject(schema, referencedSchemas, spec, visited, depth + 1);
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
         }
 
         // If schema is already resolved (no $ref) but is an array type, we need to find
@@ -1661,6 +1711,168 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
         
         return null;
+    }
+
+    /**
+     * Collect all component schema names that are referenced from paths (responses, requestBody, parameters)
+     * and from components (responses, requestBodies, parameters). Includes transitive refs.
+     * Used to generate only referenced schemas and to restrict inline schema collection.
+     */
+    private Set<String> collectAllReferencedSchemaNames(Map<String, Object> spec) {
+        Set<String> referencedSchemas = new java.util.HashSet<>();
+        java.util.Map<Object, Boolean> globalVisitedSchemas = new java.util.IdentityHashMap<>();
+        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+
+        // Helper to collect from a single schema object with StackOverflow protection
+        java.util.function.Consumer<Object> collectFromSchema = schemaObj -> {
+            if (schemaObj == null) return;
+            try {
+                collectSchemasFromSchemaObject(schemaObj, referencedSchemas, spec, globalVisitedSchemas, 0);
+            } catch (StackOverflowError e) {
+                logger.warning("StackOverflow in collectAllReferencedSchemaNames, skipping deep recursion");
+                if (schemaObj instanceof Map) {
+                    Map<String, Object> m = Util.asStringObjectMap(schemaObj);
+                    if (m != null && m.containsKey("$ref")) {
+                        String ref = (String) m.get("$ref");
+                        if (ref != null && ref.startsWith("#/components/schemas/")) {
+                            referencedSchemas.add(ref.substring(ref.lastIndexOf("/") + 1));
+                        }
+                    }
+                }
+            }
+            if (referencedSchemas.size() > 10000) {
+                logger.warning("Schema collection limit reached in collectAllReferencedSchemaNames");
+            }
+        };
+
+        // Components: responses
+        if (components != null) {
+            Map<String, Object> responses = Util.asStringObjectMap(components.get("responses"));
+            if (responses != null) {
+                for (Map.Entry<String, Object> responseEntry : responses.entrySet()) {
+                    Map<String, Object> response = Util.asStringObjectMap(responseEntry.getValue());
+                    if (response == null) continue;
+                    Set<String> visitedResponseNames = new java.util.HashSet<>();
+                    response = resolveResponseReference(response, components, visitedResponseNames);
+                    if (response == null) continue;
+                    if (response.containsKey("content")) {
+                        Map<String, Object> content = Util.asStringObjectMap(response.get("content"));
+                        if (content != null) {
+                            for (Object mediaTypeObj : content.values()) {
+                                Map<String, Object> mediaType = Util.asStringObjectMap(mediaTypeObj);
+                                if (mediaType != null && mediaType.containsKey("schema")) {
+                                    collectFromSchema.accept(mediaType.get("schema"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Components: requestBodies
+            Map<String, Object> requestBodies = Util.asStringObjectMap(components.get("requestBodies"));
+            if (requestBodies != null) {
+                for (Object rbObj : requestBodies.values()) {
+                    Map<String, Object> rb = Util.asStringObjectMap(rbObj);
+                    if (rb == null || !rb.containsKey("content")) continue;
+                    Map<String, Object> content = Util.asStringObjectMap(rb.get("content"));
+                    if (content != null) {
+                        for (Object mediaTypeObj : content.values()) {
+                            Map<String, Object> mediaType = Util.asStringObjectMap(mediaTypeObj);
+                            if (mediaType != null && mediaType.containsKey("schema")) {
+                                collectFromSchema.accept(mediaType.get("schema"));
+                            }
+                        }
+                    }
+                }
+            }
+            // Components: parameters
+            Map<String, Object> parameters = Util.asStringObjectMap(components.get("parameters"));
+            if (parameters != null) {
+                for (Object paramObj : parameters.values()) {
+                    Map<String, Object> param = Util.asStringObjectMap(paramObj);
+                    if (param != null && param.containsKey("schema")) {
+                        collectFromSchema.accept(param.get("schema"));
+                    }
+                }
+            }
+        }
+
+        // Paths: each operation's responses, requestBody, parameters
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths != null) {
+            for (Map.Entry<String, Object> pathEntry : paths.entrySet()) {
+                Map<String, Object> pathItem = Util.asStringObjectMap(pathEntry.getValue());
+                if (pathItem == null) continue;
+                // Path-level parameters
+                if (pathItem.containsKey("parameters")) {
+                    List<Map<String, Object>> params = Util.asStringObjectMapList(pathItem.get("parameters"));
+                    if (params != null) {
+                        for (Map<String, Object> param : params) {
+                            if (param != null && param.containsKey("schema")) {
+                                collectFromSchema.accept(param.get("schema"));
+                            }
+                        }
+                    }
+                }
+                for (String method : new String[]{"get", "post", "put", "patch", "delete", "head", "options", "trace"}) {
+                    if (!pathItem.containsKey(method)) continue;
+                    Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
+                    if (operation == null) continue;
+                    // Operation responses
+                    if (operation.containsKey("responses")) {
+                        Map<String, Object> operationResponses = Util.asStringObjectMap(operation.get("responses"));
+                        if (operationResponses != null) {
+                            for (Map.Entry<String, Object> responseEntry : operationResponses.entrySet()) {
+                                Map<String, Object> response = Util.asStringObjectMap(responseEntry.getValue());
+                                if (response == null) continue;
+                                Set<String> visitedResponseNames = new java.util.HashSet<>();
+                                response = resolveResponseReference(response, components, visitedResponseNames);
+                                if (response == null) continue;
+                                if (response.containsKey("content")) {
+                                    Map<String, Object> content = Util.asStringObjectMap(response.get("content"));
+                                    if (content != null) {
+                                        for (Object mediaTypeObj : content.values()) {
+                                            Map<String, Object> mediaType = Util.asStringObjectMap(mediaTypeObj);
+                                            if (mediaType != null && mediaType.containsKey("schema")) {
+                                                collectFromSchema.accept(mediaType.get("schema"));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Operation requestBody
+                    if (operation.containsKey("requestBody")) {
+                        Map<String, Object> requestBody = Util.asStringObjectMap(operation.get("requestBody"));
+                        if (requestBody != null && requestBody.containsKey("content")) {
+                            Map<String, Object> content = Util.asStringObjectMap(requestBody.get("content"));
+                            if (content != null) {
+                                for (Object mediaTypeObj : content.values()) {
+                                    Map<String, Object> mediaType = Util.asStringObjectMap(mediaTypeObj);
+                                    if (mediaType != null && mediaType.containsKey("schema")) {
+                                        collectFromSchema.accept(mediaType.get("schema"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Operation parameters
+                    if (operation.containsKey("parameters")) {
+                        List<Map<String, Object>> params = Util.asStringObjectMapList(operation.get("parameters"));
+                        if (params != null) {
+                            for (Map<String, Object> param : params) {
+                                if (param != null && param.containsKey("schema")) {
+                                    collectFromSchema.accept(param.get("schema"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return referencedSchemas;
     }
 
     /**
@@ -3077,8 +3289,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         enumPattern.append(enumValue);
                     }
                     enumPattern.append(")$");
-                    // Escape for Java string literal (backslashes and quotes)
-                    String enumPatternStr = enumPattern.toString().replace("\\", "\\\\").replace("\"", "\\\"");
+                    String enumPatternStr = escapePatternForJavaStringLiteral(enumPattern.toString());
                     annotations.append("@Pattern(regexp = \"").append(enumPatternStr).append("\")\n    ");
                 }
 
@@ -3087,9 +3298,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     Object patternObj = schema.get("pattern");
                     if (patternObj != null) {
                         String pattern = patternObj.toString();
-                        // Escape backslashes and quotes for Java string; escape parentheses for regex literal
-                        pattern = pattern.replace("\\", "\\\\").replace("\"", "\\\"").replace("(", "\\(").replace(")", "\\)");
-                        annotations.append("@Pattern(regexp = \"").append(pattern).append("\")\n    ");
+                        annotations.append("@Pattern(regexp = \"").append(escapePatternForJavaStringLiteral(pattern)).append("\")\n    ");
                     }
                 }
 
@@ -3297,14 +3506,31 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             if (allOfSchemas == null || allOfSchemas.isEmpty()) {
                 return schema;
             }
+            String singleRefSchemaName = null;
+            int refCount = 0;
             Map<String, Object> merged = new LinkedHashMap<>();
             for (Map<String, Object> sub : allOfSchemas) {
                 if (sub == null) continue;
+                String refName = getSchemaNameFromRef(sub);
+                if (refName == null) {
+                    String ref = (String) sub.get("x-resolved-ref");
+                    if (ref == null) ref = (String) sub.get("$ref");
+                    if (ref != null && ref.contains("components/schemas/")) {
+                        refName = ref.substring(ref.lastIndexOf("/") + 1);
+                    }
+                }
+                if (refName != null) {
+                    refCount++;
+                    if (singleRefSchemaName == null) singleRefSchemaName = refName;
+                }
                 Map<String, Object> resolved = resolveRefInSchema(sub, spec);
                 resolved = resolveCompositionToEffectiveSchema(resolved, spec, depth + 1);
                 if (resolved != null) {
                     mergeIntoEffectiveSchema(merged, resolved);
                 }
+            }
+            if (refCount == 1 && singleRefSchemaName != null && !merged.isEmpty()) {
+                merged.put("x-java-type-ref", singleRefSchemaName);
             }
             return merged.isEmpty() ? schema : merged;
         }
@@ -3422,11 +3648,47 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             return "Object";
         }
 
+        // When allOf has exactly one ref branch (e.g. L10NString + enum constraints), use that ref's type
+        if (schema.containsKey("allOf")) {
+            List<Map<String, Object>> allOfSchemas = Util.asStringObjectMapList(schema.get("allOf"));
+            if (allOfSchemas != null) {
+                int refCount = 0;
+                String singleRefSchemaName = null;
+                for (Map<String, Object> sub : allOfSchemas) {
+                    if (sub == null) continue;
+                    String name = getSchemaNameFromRef(sub);
+                    if (name == null) {
+                        // Fallback: extract from $ref/x-resolved-ref when ref contains "components/schemas/"
+                        String ref = (String) sub.get("x-resolved-ref");
+                        if (ref == null) ref = (String) sub.get("$ref");
+                        if (ref != null && ref.contains("components/schemas/")) {
+                            name = ref.substring(ref.lastIndexOf("/") + 1);
+                        }
+                    }
+                    if (name != null) {
+                        refCount++;
+                        if (singleRefSchemaName == null) {
+                            singleRefSchemaName = name;
+                        }
+                    }
+                }
+                if (refCount == 1 && singleRefSchemaName != null) {
+                    return toJavaClassName(singleRefSchemaName);
+                }
+            }
+        }
+
         // Resolve property-level allOf/oneOf/anyOf to effective schema for type resolution
         if (schema.containsKey("allOf") || schema.containsKey("oneOf") || schema.containsKey("anyOf")) {
             Map<String, Object> effective = resolveCompositionToEffectiveSchema(schema, currentSpecForResolution.get());
             if (effective != null && effective != schema) {
                 schema = effective;
+            }
+            if (schema != null && schema.containsKey("x-java-type-ref")) {
+                String refName = (String) schema.get("x-java-type-ref");
+                if (refName != null && !refName.isEmpty()) {
+                    return toJavaClassName(refName);
+                }
             }
         }
 
@@ -3559,6 +3821,12 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 }
             }
             case "object" -> {
+                if (schema.containsKey("x-java-type-ref")) {
+                    String refName = (String) schema.get("x-java-type-ref");
+                    if (refName != null && !refName.isEmpty()) {
+                        return toJavaClassName(refName);
+                    }
+                }
                 // Check if this is an in-lined schema
                 if (inlinedSchemas.containsKey(schema)) {
                     return inlinedSchemas.get(schema);
@@ -3943,8 +4211,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 String pattern = (String) schema.get("pattern");
                 String errorCode = "L10N_INVALID_VALUE_FOR_" + errorPrefix + "_INVALID_PATTERN";
                 sb.append("    List<String> arguments").append(getNextArgCounter()).append(" = List.of(\"").append(paramName)
-                        .append("\", \"").append(escapeJavaString(pattern)).append("\");\n");
-                sb.append("    v.add(new PatternValidator(\"").append(paramName).append("\", \"").append(escapeJavaString(pattern))
+                        .append("\", \"").append(escapePatternForJavaStringLiteral(pattern)).append("\");\n");
+                sb.append("    v.add(new PatternValidator(\"").append(paramName).append("\", \"").append(escapePatternForJavaStringLiteral(pattern))
                         .append("\", \"").append(errorCode).append("\", arguments").append(getCurrentArgCounter())
                         .append(", Collections.emptyList(), \"").append(paramType).append("\",false));\n");
             }
@@ -4036,6 +4304,34 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Escape a regex pattern for use inside a Java string literal (e.g. in @Pattern(regexp = "...")).
+     * Doubles every backslash; adds \\ before ( and ) only when not already escaped.
+     */
+    private String escapePatternForJavaStringLiteral(String pattern) {
+        if (pattern == null) return "";
+        StringBuilder sb = new StringBuilder();
+        boolean afterBackslash = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (c == '\\') {
+                sb.append("\\\\");
+                afterBackslash = !afterBackslash;
+            } else if (c == '"') {
+                sb.append("\\\"");
+                afterBackslash = false;
+            } else if (c == '(' || c == ')') {
+                if (!afterBackslash) sb.append("\\\\");
+                sb.append(c);
+                afterBackslash = false;
+            } else {
+                sb.append(c);
+                afterBackslash = false;
+            }
+        }
+        return sb.toString();
     }
 
     /**
