@@ -262,13 +262,13 @@ public class PathResolver {
     /**
      * Validate that resolved path doesn't escape base directory (path traversal protection)
      *
-     * <p>Logs security events for path traversal attempts to aid in security monitoring.</p>
+     * <p>Logs path traversal attempts at FINE (debug) level when resolution continues via search paths.</p>
      */
     private void validatePathTraversal(Path baseDir, Path resolvedPath) throws OASSDKException {
         if (baseDir == null) {
             // If no base directory, just check that path is absolute and exists
             if (!resolvedPath.isAbsolute()) {
-                logger.warning("Path traversal attempt detected: relative path without base directory - " + resolvedPath);
+                logger.fine("Path traversal attempt detected: relative path without base directory - " + resolvedPath);
                 throw new OASSDKException("Path traversal detected: relative path without base directory");
             }
             return;
@@ -281,7 +281,7 @@ public class PathResolver {
             // Ensure resolved path is within base directory
             if (!normalizedResolved.startsWith(normalizedBase)) {
                 // Log security event for monitoring
-                logger.warning("Path traversal attempt detected: " + resolvedPath +
+                logger.fine("Path traversal attempt detected: " + resolvedPath +
                         " escapes base directory " + baseDir);
                 throw new OASSDKException("Path traversal detected: " + resolvedPath +
                         " escapes base directory " + baseDir);
