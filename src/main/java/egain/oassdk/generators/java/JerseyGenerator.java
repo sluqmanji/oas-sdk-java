@@ -1045,6 +1045,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             logger.info("Few or no schema references found from paths/components; generating all schemas");
         }
 
+        // Schemas referenced in responses (used to skip array types not referenced in any response)
+        Set<String> schemasReferencedInResponses = collectSchemasReferencedInResponses(spec);
+
         // Collect schemas that are only used via allOf/oneOf/anyOf
         Set<String> compositionOnlySchemas = collectCompositionOnlySchemas(schemas);
 
@@ -1063,6 +1066,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // Skip schemas not referenced from paths or components
             if (!allReferencedNames.contains(schemaName)) {
                 continue;
+            }
+
+            // Array types: only generate if referenced in a response (skip unreferenced array schemas)
+            if (schema.containsKey("type") && "array".equals(schema.get("type"))) {
+                if (!schemasReferencedInResponses.contains(schemaName)) {
+                    continue;
+                }
             }
 
             // Filter out error schemas
