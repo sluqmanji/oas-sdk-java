@@ -327,7 +327,9 @@ public class MarkdownGenerator {
 
         for (Map.Entry<String, Object> pathEntry : paths.entrySet()) {
             String path = pathEntry.getKey();
-            Map<String, Object> pathItem = Util.asStringObjectMap(pathEntry.getValue());
+            Object pathValue = pathEntry.getValue();
+            if (!(pathValue instanceof Map)) continue;
+            Map<String, Object> pathItem = Util.asStringObjectMap(pathValue);
 
             if (pathItem == null) continue;
 
@@ -337,7 +339,9 @@ public class MarkdownGenerator {
                 String method = methodEntry.getKey();
                 if (method.startsWith("x-")) continue;
 
-                Map<String, Object> operation = Util.asStringObjectMap(methodEntry.getValue());
+                Object opValue = methodEntry.getValue();
+                if (!(opValue instanceof Map)) continue;
+                Map<String, Object> operation = Util.asStringObjectMap(opValue);
                 if (operation == null) continue;
 
                 markdown.append("#### ").append(method.toUpperCase(Locale.ROOT)).append("\n\n");
