@@ -352,7 +352,7 @@ public class OASValidator {
      * Validate operation ID format
      */
     private boolean isValidOperationId(String operationId) {
-        return operationId.matches("^[a-zA-Z][a-zA-Z0-9_]*$");
+        return operationId.matches("^[a-zA-Z][a-zA-Z0-9_\\-]*$");
     }
 
     /**

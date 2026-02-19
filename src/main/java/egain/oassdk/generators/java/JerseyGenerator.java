@@ -701,8 +701,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             }
         }
 
-        // Generate method signature
-        String methodName = operationId != null ? operationId : method;
+        // Generate method signature (normalize operationId to valid Java method name when present)
+        String methodName = (operationId != null && !operationId.isEmpty()) ? toJavaMethodName(operationId) : method;
         content.append("    public Response ").append(methodName).append("(");
         if (!parameterList.isEmpty()) {
             // Join parameters, handling multi-line annotations
@@ -4014,6 +4014,21 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     }
 
     /**
+     * Convert operationId to valid Java method name (camelCase, first letter lower).
+     * Handles hyphens, underscores, spaces, dots as word breaks (e.g. get-jobId-status -> getJobIdStatus).
+     */
+    private String toJavaMethodName(String operationId) {
+        if (operationId == null || operationId.isEmpty()) {
+            return "op";
+        }
+        String className = toJavaClassName(operationId);
+        if (className.isEmpty() || !Character.isLetter(className.charAt(0))) {
+            return "op";
+        }
+        return Character.toLowerCase(className.charAt(0)) + className.substring(1);
+    }
+
+    /**
      * Generate query parameter validators (QueryParamValidators.java and ValidationMapHelper.java)
      */
     private void generateQueryParamValidators(Map<String, Object> spec, String outputDir) throws IOException {
@@ -4091,8 +4106,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         String baseName;
 
         if (operationId != null && !operationId.isEmpty()) {
-            // Use operation ID as base - keep original case (camelCase)
-            baseName = operationId;
+            // Use operation ID as base - normalize to valid Java identifier (camelCase)
+            baseName = toJavaMethodName(operationId);
         } else {
             // Generate from path and method
             String pathPart = path.replaceAll("[^a-zA-Z0-9]", "");

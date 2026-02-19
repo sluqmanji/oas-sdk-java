@@ -289,6 +289,25 @@ public class OASValidatorTest {
             validator.validate(spec);
         });
     }
+
+    @Test
+    public void testValidateOperationIdWithHyphens() {
+        Map<String, Object> spec = new HashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("info", Map.of("title", "Test", "version", "1.0.0"));
+        Map<String, Object> paths = new HashMap<>();
+        Map<String, Object> pathItem = new HashMap<>();
+        Map<String, Object> get = new HashMap<>();
+        get.put("operationId", "get-jobId-status");
+        get.put("responses", Map.of("200", Map.of("description", "OK")));
+        pathItem.put("get", get);
+        paths.put("/test", pathItem);
+        spec.put("paths", paths);
+
+        assertDoesNotThrow(() -> {
+            validator.validate(spec);
+        });
+    }
     
     @Test
     public void testValidateParameterMissingName() {

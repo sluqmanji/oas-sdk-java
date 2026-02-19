@@ -384,8 +384,9 @@ public class OASParser {
             visitedObjects.add(map);
 
             // Recursively process all values in the map, but skip if this map was already processed
-            // to avoid infinite loops with circular references
-            for (Map.Entry<String, Object> entry : map.entrySet()) {
+            // to avoid infinite loops with circular references. Iterate over a copy to avoid
+            // ConcurrentModificationException when addResolvedExternalSchemaToMainSpec mutates the same map.
+            for (Map.Entry<String, Object> entry : new ArrayList<>(map.entrySet())) {
                 Object value = entry.getValue();
                 // Skip processing $ref entries that are already being resolved (circular reference)
                 if (value instanceof Map) {
@@ -602,7 +603,19 @@ public class OASParser {
                 if (jsonPath == null || jsonPath.isEmpty() || "/".equals(jsonPath)) {
                     return externalSpec;
                 } else {
-                    Object fragment = resolveJsonPath(externalSpec, jsonPath);
+                    String path = jsonPath.startsWith("/") ? jsonPath.substring(1) : jsonPath;
+                    Object fragment;
+                    try {
+                        fragment = resolveJsonPath(externalSpec, path);
+                    } catch (OASSDKException e) {
+                        if (e.getMessage() != null && e.getMessage().contains("Reference not found") && path.startsWith("components/")) {
+                            Object resolved = resolveComponentFromLoadedFilesOrByConvention(path, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
+                            if (resolved != null) {
+                                return resolved;
+                            }
+                        }
+                        throw e;
+                    }
                     // Record transitive schema refs from this fragment so they get merged (e.g. requestBody -> schema)
                     Set<String> schemaRefPaths = new HashSet<>();
                     collectSchemaRefPaths(fragment, schemaRefPaths);
@@ -621,7 +634,18 @@ public class OASParser {
                     throw new OASSDKException("Current file not found in loaded files: " + currentFileKey);
                 }
                 String path = jsonPath.startsWith("/") ? jsonPath.substring(1) : jsonPath;
-                return resolveJsonPath(currentSpec, path);
+                try {
+                    return resolveJsonPath(currentSpec, path);
+                } catch (OASSDKException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Reference not found")) {
+                        // Try to resolve from already-loaded specs or load by convention (e.g. KnowledgeCommonObjects.yaml)
+                        Object resolved = resolveComponentFromLoadedFilesOrByConvention(path, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
+                        if (resolved != null) {
+                            return resolved;
+                        }
+                    }
+                    throw e;
+                }
             }
         } else {
             // Could be an external file reference without #, or an internal JSON path reference
@@ -656,9 +680,112 @@ public class OASParser {
                     throw new OASSDKException("Current file not found in loaded files: " + currentFileKey);
                 }
                 String jsonPath = ref.startsWith("/") ? ref.substring(1) : ref;
-                return resolveJsonPath(currentSpec, jsonPath);
+                try {
+                    return resolveJsonPath(currentSpec, jsonPath);
+                } catch (OASSDKException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Reference not found")) {
+                        Object resolved = resolveComponentFromLoadedFilesOrByConvention(jsonPath, baseDir, currentFileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
+                        if (resolved != null) {
+                            return resolved;
+                        }
+                    }
+                    throw e;
+                }
             }
         }
+    }
+
+    /**
+     * When an internal ref (e.g. #/components/parameters/portalReadableId) is not found in the current spec,
+     * try to resolve it from already-loaded specs or by loading a conventional file (e.g. KnowledgeCommonObjects.yaml).
+     * If found, merges the component into the main spec and returns the value.
+     */
+    private Object resolveComponentFromLoadedFilesOrByConvention(String jsonPath, Path baseDir, String currentFileKey, String baseFileKey,
+                                                                  Map<String, Map<String, Object>> loadedFiles, Set<String> resolvingRefs,
+                                                                  Set<Object> visitedObjects, Map<String, Set<String>> referencedFragmentsByFile) {
+        if (jsonPath == null || !jsonPath.startsWith("components/")) return null;
+        String pathWithSlash = jsonPath.startsWith("/") ? jsonPath : "/" + jsonPath;
+
+        // 1) Try already-loaded specs (except current/main - we already know it's not there)
+        Map<String, Object> mainSpec = loadedFiles.get(baseFileKey);
+        for (Map.Entry<String, Map<String, Object>> entry : loadedFiles.entrySet()) {
+            if (entry.getKey().equals(baseFileKey)) continue;
+            Map<String, Object> spec = entry.getValue();
+            if (spec == null) continue;
+            try {
+                Object value = resolveJsonPath(spec, jsonPath);
+                if (value != null && value instanceof Map) {
+                    Map<String, Object> valueMap = Util.asStringObjectMap(value);
+                    if (valueMap != null) {
+                        putComponentIntoMainSpec(mainSpec, pathWithSlash, new HashMap<>(valueMap));
+                        return valueMap;
+                    }
+                }
+            } catch (OASSDKException ignored) {
+                // not in this spec, try next
+            }
+        }
+
+        // 2) Try to load by convention: KnowledgeCommonObjects.yaml in same domain (e.g. knowledge/models/portalmgr/v4/)
+        // Use main spec location (baseFileKey) so convention works when the ref is from an external file (e.g. common.yaml)
+        Path mainSpecPath = baseFileKey != null ? Paths.get(baseFileKey) : null;
+        Path basePath = (mainSpecPath != null && mainSpecPath.getParent() != null) ? mainSpecPath.getParent() : baseDir;
+        if (basePath == null && currentFileKey != null) basePath = Paths.get(currentFileKey).getParent();
+        if (basePath != null && basePath.getNameCount() >= 3) {
+            // Build relative path so PathResolver tries search paths: knowledge/models/portalmgr/v4/KnowledgeCommonObjects.yaml
+            Path domainParent = basePath.getParent().getParent();
+            String relativePath = domainParent.getFileName() + "/models/" + basePath.getParent().getFileName() + "/" + basePath.getFileName() + "/KnowledgeCommonObjects.yaml";
+            try {
+                Path resolvedPath = pathResolver.resolveReference(relativePath, null);
+                if (resolvedPath != null && Files.exists(resolvedPath) && Files.isRegularFile(resolvedPath)) {
+                    String fileKey = normalizePathKey(resolvedPath);
+                    Map<String, Object> externalSpec = loadedFiles.get(fileKey);
+                    if (externalSpec == null) {
+                        externalSpec = parse(PathUtils.toUnixPath(resolvedPath));
+                        externalSpec = new HashMap<>(externalSpec);
+                        loadedFiles.put(fileKey, externalSpec);
+                        resolveReferencesRecursive(externalSpec, resolvedPath.getParent(), fileKey, baseFileKey, loadedFiles, resolvingRefs, visitedObjects, referencedFragmentsByFile);
+                    }
+                    referencedFragmentsByFile.computeIfAbsent(fileKey, k -> new HashSet<>()).add(pathWithSlash);
+                    if (mainSpec != null) {
+                        mergeExternalSchemasIntoMainSpec(fileKey, externalSpec, mainSpec, referencedFragmentsByFile.get(fileKey));
+                    }
+                    Object value = resolveJsonPath(externalSpec, jsonPath);
+                    if (value != null && value instanceof Map) {
+                        Map<String, Object> valueMap = Util.asStringObjectMap(value);
+                        if (valueMap != null) {
+                            putComponentIntoMainSpec(mainSpec, pathWithSlash, new HashMap<>(valueMap));
+                            return valueMap;
+                        }
+                    }
+                }
+            } catch (OASSDKException ignored) {
+                // convention file not found or invalid
+            }
+        }
+
+        return null;
+    }
+
+    /** Put a single component into main spec at the given JSON path (e.g. /components/parameters/portalReadableId). */
+    private void putComponentIntoMainSpec(Map<String, Object> mainSpec, String pathWithSlash, Map<String, Object> value) {
+        if (mainSpec == null || pathWithSlash == null || !pathWithSlash.startsWith("/components/")) return;
+        String path = pathWithSlash.startsWith("/") ? pathWithSlash.substring(1) : pathWithSlash;
+        String[] parts = path.split("/");
+        if (parts.length != 3 || !"components".equals(parts[0])) return;  // components/parameters/Name or components/requestBodies/Name etc.
+        @SuppressWarnings("unchecked")
+        Map<String, Object> components = (Map<String, Object>) mainSpec.get("components");
+        if (components == null) {
+            components = new HashMap<>();
+            mainSpec.put("components", components);
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> section = (Map<String, Object>) components.get(parts[1]);
+        if (section == null) {
+            section = new HashMap<>();
+            components.put(parts[1], section);
+        }
+        section.put(parts[2], value);
     }
 
     /**
@@ -781,6 +908,48 @@ public class OASParser {
                 } else {
                     mainSchemas.put(schemaName, schemaValue);
                 }
+            }
+        }
+
+        // Merge external parameters, requestBodies, and responses so internal refs like
+        // #/components/parameters/portalReadableId resolve when the component is defined in an external file.
+        mergeExternalComponentsIntoMainSpec(externalComponents, mainComponents, "parameters", referencedFragments, mergeAll);
+        mergeExternalComponentsIntoMainSpec(externalComponents, mainComponents, "requestBodies", referencedFragments, mergeAll);
+        mergeExternalComponentsIntoMainSpec(externalComponents, mainComponents, "responses", referencedFragments, mergeAll);
+    }
+
+    /**
+     * Merge one component type (parameters, requestBodies, responses) from external spec into main spec.
+     * Only merges entries not already present in main; when mergeAll is false, only merges if that component path was referenced.
+     */
+    private void mergeExternalComponentsIntoMainSpec(Map<String, Object> externalComponents,
+                                                     Map<String, Object> mainComponents,
+                                                     String componentType,
+                                                     Set<String> referencedFragments,
+                                                     boolean mergeAll) {
+        if (externalComponents == null || mainComponents == null) return;
+        Map<String, Object> externalMap = Util.asStringObjectMap(externalComponents.get(componentType));
+        if (externalMap == null || externalMap.isEmpty()) return;
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mainMap = (Map<String, Object>) mainComponents.get(componentType);
+        if (mainMap == null) {
+            mainMap = new HashMap<>();
+            mainComponents.put(componentType, mainMap);
+        }
+        String prefix = "/components/" + componentType + "/";
+        for (Map.Entry<String, Object> entry : externalMap.entrySet()) {
+            String name = entry.getKey();
+            if (!mergeAll && (referencedFragments == null || !referencedFragments.contains(prefix + name))) {
+                continue;
+            }
+            if (mainMap.containsKey(name)) continue;
+            Object value = entry.getValue();
+            if (value instanceof Map) {
+                Map<String, Object> valueMap = Util.asStringObjectMap(value);
+                mainMap.put(name, valueMap != null ? new HashMap<>(valueMap) : value);
+            } else {
+                mainMap.put(name, value);
             }
         }
     }

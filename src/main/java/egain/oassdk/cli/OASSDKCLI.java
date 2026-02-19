@@ -202,7 +202,7 @@ public class OASSDKCLI implements Callable<Integer> {
         }
     }
 
-    @Command(name = "all", description = "Generate complete project from OpenAPI specification")
+    @Command(name = "all", description = "Generate complete project from OpenAPI specification (application, unit/integration/NFR tests, mock data, docs)")
     public static class AllCommand implements Callable<Integer> {
 
         @Parameters(index = "0", description = "Path to OpenAPI specification file")
@@ -212,32 +212,49 @@ public class OASSDKCLI implements Callable<Integer> {
                 description = "Output directory")
         private String output;
 
+        @Option(names = {"-p", "--package"}, description = "Package name for generated code")
+        private String packageName;
+
+        @Option(names = {"-l", "--language"}, defaultValue = "java",
+                description = "Programming language")
+        private String language;
+
+        @Option(names = {"-f", "--framework"}, defaultValue = "jersey",
+                description = "Framework")
+        private String framework;
+
+        @Option(names = {"-s", "--search-path"}, split = ",",
+                description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
+        private List<String> searchPaths;
+
         @Option(names = {"-c", "--config"}, description = "Configuration file")
         private String config;
 
         @Override
         public Integer call() {
             try {
-                // Load configuration if provided
-                GeneratorConfig generatorConfig = null;
-                TestConfig testConfig = null;
+                GeneratorConfig generatorConfig;
+                TestConfig testConfig = TestConfig.builder().build();
                 SLAConfig slaConfig = null;
 
                 if (config != null) {
                     // Configuration loading from file is not yet implemented
-                    // For now, use command line parameters to build configuration
                     generatorConfig = GeneratorConfig.builder().build();
-                    testConfig = TestConfig.builder().build();
                     slaConfig = SLAConfig.builder().build();
+                } else {
+                    generatorConfig = GeneratorConfig.builder()
+                            .language(language)
+                            .framework(framework)
+                            .packageName(packageName)
+                            .outputDir(output)
+                            .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
+                            .build();
                 }
 
-                // Initialize SDK
                 OASSDK sdk = new OASSDK(generatorConfig, testConfig, slaConfig);
 
-                // Load specification
                 sdk.loadSpec(specPath);
 
-                // Generate everything
                 sdk.generateAll(output);
 
                 logger.info("✅ Complete project generated successfully in " + output);
