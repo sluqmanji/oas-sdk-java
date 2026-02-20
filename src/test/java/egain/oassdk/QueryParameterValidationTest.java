@@ -49,11 +49,11 @@ public class QueryParameterValidationTest {
         
         // Check validation infrastructure (QueryParamValidators and ValidationMapHelper)
         System.out.println("\n3. Checking validation infrastructure...");
-        checkValidationInfrastructure(outputDir);
+        checkValidationInfrastructure(outputDir, packageName);
         
         // Check validation classes are generated
         System.out.println("\n4. Checking validation classes generation...");
-        checkValidationClassesGenerated(outputDir);
+        checkValidationClassesGenerated(outputDir, packageName);
         
         // Check resources don't have validation annotations (validation is programmatic)
         System.out.println("\n5. Checking resources use programmatic validation...");
@@ -66,23 +66,26 @@ public class QueryParameterValidationTest {
         System.out.println("\n=== All Validation Checks Passed ===");
     }
     
-    private void checkValidationInfrastructure(Path outputDir) throws IOException {
-        // Check QueryParamValidators.java exists
-        Path queryParamValidators = outputDir.resolve("src/main/java/egain/ws/oas/gen/QueryParamValidators.java");
+    private void checkValidationInfrastructure(Path outputDir, String packageName) throws IOException {
+        String packagePath = packageName.replace(".", "/");
+        Path packageDir = outputDir.resolve("src/main/java").resolve(packagePath);
+
+        // Check QueryParamValidators.java exists (under passed-in package)
+        Path queryParamValidators = packageDir.resolve("QueryParamValidators.java");
         assertTrue(Files.exists(queryParamValidators), "QueryParamValidators.java should exist");
         System.out.println("   ✓ QueryParamValidators.java exists");
-        
+
         String validatorsContent = Files.readString(queryParamValidators);
         assertTrue(validatorsContent.contains("public class QueryParamValidators"),
             "QueryParamValidators should be a public class");
-        assertTrue(validatorsContent.contains("import egain.ws.oas.validation."),
-            "Should import validation classes from lowercase validation package");
-        
-        // Check ValidationMapHelper.java exists and has validate() method
-        Path validationMapHelper = outputDir.resolve("src/main/java/egain/ws/oas/gen/ValidationMapHelper.java");
+        assertTrue(validatorsContent.contains("import " + packageName + "."),
+            "Should import validation classes from package " + packageName);
+
+        // Check ValidationMapHelper.java exists and has validate() method (under passed-in package)
+        Path validationMapHelper = packageDir.resolve("ValidationMapHelper.java");
         assertTrue(Files.exists(validationMapHelper), "ValidationMapHelper.java should exist");
         System.out.println("   ✓ ValidationMapHelper.java exists");
-        
+
         String helperContent = Files.readString(validationMapHelper);
         assertTrue(helperContent.contains("public class ValidationMapHelper"),
             "ValidationMapHelper should be a public class");
@@ -93,11 +96,12 @@ public class QueryParameterValidationTest {
         System.out.println("   ✓ ValidationMapHelper.validate() method exists");
     }
     
-    private void checkValidationClassesGenerated(Path outputDir) throws IOException {
-        Path validationDir = outputDir.resolve("src/main/java/egain/ws/oas/validation");
+    private void checkValidationClassesGenerated(Path outputDir, String packageName) throws IOException {
+        String packagePath = packageName.replace(".", "/");
+        Path validationDir = outputDir.resolve("src/main/java").resolve(packagePath);
         assertTrue(Files.exists(validationDir), "Validation directory should exist");
         assertTrue(Files.isDirectory(validationDir), "Validation path should be a directory");
-        
+
         List<String> validationClasses = Files.list(validationDir)
             .filter(Files::isRegularFile)
             .filter(path -> path.toString().endsWith(".java"))
