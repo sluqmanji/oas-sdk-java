@@ -1133,9 +1133,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             }
         }
 
-        // Generate JAXBBean interface
-        generateJAXBBeanInterface(outputDir, packagePath);
-
         // Generate ObjectFactory and jaxb.index for generated models only
         generateObjectFactory(generatedTopLevelClassNames, outputDir, packagePath);
         generateJaxbIndex(generatedTopLevelClassNames, outputDir, packagePath);
@@ -2285,6 +2282,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
 
         content.append("package ").append(packagePath).append(".model;\n\n");
+        content.append("import com.egain.platform.common.JAXBBean;\n");
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import javax.validation.constraints.*;\n");
         content.append("import javax.xml.bind.annotation.*;\n");
