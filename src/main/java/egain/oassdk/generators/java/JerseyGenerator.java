@@ -1188,9 +1188,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".model;\n\n");
-        content.append("import jakarta.xml.bind.JAXBElement;\n");
-        content.append("import jakarta.xml.bind.annotation.XmlElementDecl;\n");
-        content.append("import jakarta.xml.bind.annotation.XmlRegistry;\n");
+        content.append("import javax.xml.bind.JAXBElement;\n");
+        content.append("import javax.xml.bind.annotation.XmlElementDecl;\n");
+        content.append("import javax.xml.bind.annotation.XmlRegistry;\n");
         content.append("import javax.validation.constraints.*;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
 
@@ -2287,8 +2287,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("package ").append(packagePath).append(".model;\n\n");
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import javax.validation.constraints.*;\n");
-        content.append("import jakarta.xml.bind.annotation.*;\n");
-        content.append("import jakarta.xml.bind.JAXBElement;\n");
+        content.append("import javax.xml.bind.annotation.*;\n");
+        content.append("import javax.xml.bind.JAXBElement;\n");
         content.append("import javax.xml.namespace.QName;\n");
         content.append("import java.io.Serializable;\n");
         content.append("import java.util.Objects;\n");
@@ -2786,14 +2786,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                         
                                 <!-- JAXB -->
                                 <dependency>
-                                    <groupId>jakarta.xml.bind</groupId>
-                                    <artifactId>jakarta.xml.bind-api</artifactId>
-                                    <version>4.0.0</version>
+                                    <groupId>javax.xml.bind</groupId>
+                                    <artifactId>javax.xml.bind-api</artifactId>
+                                    <version>2.3.1</version>
                                 </dependency>
                                 <dependency>
                                     <groupId>org.glassfish.jaxb</groupId>
                                     <artifactId>jaxb-runtime</artifactId>
-                                    <version>4.0.2</version>
+                                    <version>2.3.11</version>
                                 </dependency>
                         
                                 <!-- Jackson -->
