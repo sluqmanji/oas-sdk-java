@@ -26,6 +26,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     private static final int MAX_COMPOSITION_RESOLVE_DEPTH = 10;
 
     private GeneratorConfig config;
+    private boolean isModelsOnly = false;
     // Map to store in-lined schemas: schema object -> generated model name
     private final Map<Object, String> inlinedSchemas = new java.util.IdentityHashMap<>();
     /** Current spec for resolving $ref inside composition (set during generate). */
@@ -40,32 +41,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         try {
             currentSpecForResolution.set(spec);
-            // Create directory structure
-            createDirectoryStructure(outputDir, packageName);
-
-            // Generate main application class
-            generateMainApplicationClass(spec, outputDir, packageName);
+            this.isModelsOnly = config.isModelsOnly();
+            // Create directory structure for full generation; models-only relies on writeFile creating parent dirs
+            if (!isModelsOnly) {
+                createDirectoryStructure(outputDir, packageName);
+            }
 
             // Collect in-lined schemas from responses before generating models
             collectInlinedSchemas(spec);
 
-            // Generate resources (controllers in Jersey terminology)
-            generateResources(spec, outputDir, packageName);
-
             // Generate models (including in-lined schemas)
             generateModels(spec, outputDir, packageName);
-
-            // Generate services
-            generateServices(outputDir, packageName);
-
-            // Generate configuration
-            generateConfiguration(outputDir, packageName);
-
-            // Generate exception mappers
-            generateExceptionMappers(outputDir, packageName);
-
-            // Generate build files
-            generateBuildFiles(spec, outputDir, packageName);
 
             // Generate query parameter validators
             generateQueryParamValidators(spec, outputDir, packageName);
@@ -73,8 +59,28 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // Generate Validation classes automatically
             generateValidationClasses(outputDir, packageName);
 
-            // Generate executors
-            generateExecutors(spec, outputDir, packageName);
+            if (!isModelsOnly) {
+                // Generate main application class
+                generateMainApplicationClass(spec, outputDir, packageName);
+
+                // Generate resources (controllers in Jersey terminology)
+                generateResources(spec, outputDir, packageName);
+
+                // Generate services
+                generateServices(outputDir, packageName);
+
+                // Generate configuration
+                generateConfiguration(outputDir, packageName);
+
+                // Generate exception mappers
+                generateExceptionMappers(outputDir, packageName);
+
+                // Generate build files
+                generateBuildFiles(spec, outputDir, packageName);
+
+                // Generate executors
+                generateExecutors(spec, outputDir, packageName);
+            }
 
         } catch (Exception e) {
             logger.log(java.util.logging.Level.SEVERE, "Failed to generate Jersey application: " + e.getMessage(), e);
@@ -916,8 +922,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         // Skip if it's part of a composition (allOf/oneOf/anyOf) - those should be merged, not separate models
         String type = (String) schema.get("type");
         if ("object".equals(type) && schema.containsKey("properties") && !schema.containsKey("$ref") && !isInCompositionContext) {
+            // Ignore if this does not have "x-resolved-ref"
             // Only register if it's not a top-level schema and not already registered
-            if (!topLevelSchemaObjects.contains(schema) && !inlinedSchemas.containsKey(schema)) {
+            if (!topLevelSchemaObjects.contains(schema) && !inlinedSchemas.containsKey(schema) && schema.containsKey("x-resolved-ref")) {
                 // Generate a name for this inline schema
                 String modelName = generateInlineSchemaNameFromProperty(schema, parentPropertyName);
                 inlinedSchemas.put(schema, modelName);
@@ -945,7 +952,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             Object itemsObj = schema.get("items");
             Map<String, Object> itemsMap = Util.asStringObjectMap(itemsObj);
             if (itemsMap != null) {
-                collectInlineSchemasFromSchemaProperties(itemsMap, parentPropertyName, spec, visited, topLevelSchemaObjects, isInCompositionContext, depth + 1);
+                // Not setting parentPropertyName for array items so schema name is not derived from that
+                collectInlineSchemasFromSchemaProperties(itemsMap, null, spec, visited, topLevelSchemaObjects, isInCompositionContext, depth + 1);
             }
         }
     }
@@ -967,6 +975,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             return toJavaClassName(capitalize(propertyName));
         }
 
+        // Check if "x-resolved-ref" is set in schema. We can use the resolved ref name as the model name.
+        if (schema.containsKey("x-resolved-ref")) {
+            String resolvedRef = (String) schema.get("x-resolved-ref");
+            if (resolvedRef != null && !resolvedRef.isEmpty()) {
+                // Extract the last part of the resolved ref as the model name
+                String[] parts = resolvedRef.split("/");
+                String lastPart = parts[parts.length - 1];
+                return toJavaClassName(lastPart);
+            }
+        }
+
         // Fallback to generic name
         return "InlineObject" + inlinedSchemas.size();
     }
@@ -975,16 +994,34 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      * Generate a name for an in-lined schema
      */
     private String generateInlinedSchemaName(String operationId, Map<String, Object> schema, int counter) {
+
+        // First, try to use the title if available
+        if (schema.containsKey("title")) {
+            String title = (String) schema.get("title");
+            if (title != null && !title.isEmpty()) {
+                return toJavaClassName(title);
+            }
+        }
+
+        // Check if "x-resolved-ref" is set in schema. We can use the resolved ref name as the model name.
+        if (schema.containsKey("x-resolved-ref")) {
+            String resolvedRef = (String) schema.get("x-resolved-ref");
+            if (resolvedRef != null && !resolvedRef.isEmpty()) {
+                // Extract the last part of the resolved ref as the model name
+                String[] parts = resolvedRef.split("/");
+                String lastPart = parts[parts.length - 1];
+                return toJavaClassName(lastPart);
+            }
+        }
+
         // Try to generate a meaningful name from the schema properties
         if (schema.containsKey("properties")) {
             Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
 
-            // Look for common patterns like "promptTemplates", "templates", etc.
+            // Look for common patterns like "promptTemplates", "templates", etc. (plural naming logic commented out)
+            /*
             for (String propName : properties.keySet()) {
-                // If property name suggests a collection (ends with 's' or plural forms), use it
                 if (propName.endsWith("s") && propName.length() > 1) {
-                    // Check if it's a plural (not just a word ending in 's')
-                    // For "promptTemplates", we want "PromptTemplates" (without Response suffix)
                     String capitalized = capitalize(propName);
                     return toJavaClassName(capitalized);
                 } else if (propName.endsWith("List") || propName.endsWith("Array")) {
@@ -994,9 +1031,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     }
                 }
             }
+            */
 
             // If we have a single property, use it
-            if (properties.size() == 1) {
+            if (properties!=null && properties.size() == 1) {
                 String propName = properties.keySet().iterator().next();
                 return toJavaClassName(capitalize(propName));
             }
@@ -1118,6 +1156,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
             generatedTopLevelClassNames.add(javaClassName);
             generateModel(javaClassName, schema, outputDir, packagePath, spec);
+            if (isModelsOnly) {
+                generateObjectFactory(javaClassName, outputDir, packagePath);
+                generateJaxbIndex(javaClassName, outputDir, packagePath);
+            }
         }
 
         // Generate models for in-lined schemas
@@ -1128,12 +1170,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             Map<String, Object> schema = Util.asStringObjectMap(schemaObj);
             if (schema != null) {
                 generateModel(modelName, schema, outputDir, packagePath, spec);
+                if (isModelsOnly) {
+                    generateObjectFactory(modelName, outputDir, packagePath);
+                    generateJaxbIndex(modelName, outputDir, packagePath);
+                }
             }
         }
 
-        // Generate ObjectFactory and jaxb.index for generated models only
-        generateObjectFactory(generatedTopLevelClassNames, outputDir, packagePath);
-        generateJaxbIndex(generatedTopLevelClassNames, outputDir, packagePath);
+        // When not models-only: single shared ObjectFactory and jaxb.index for all models
+        if (!isModelsOnly) {
+            generateObjectFactory(generatedTopLevelClassNames, outputDir, packagePath);
+            generateJaxbIndex(generatedTopLevelClassNames, outputDir, packagePath);
+        }
     }
 
     /**
@@ -1141,7 +1189,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      */
     private void generateJAXBBeanInterface(String outputDir, String packagePath) throws IOException {
         String content = "package " + packagePath + ".model;\n\n" +
-                "import java.util.Set;\n\n" +
+                "import java.util.List;\n\n" +
                 "/**\n" +
                 " * Interface for JAXB beans with dynamic attribute support.\n" +
                 " * All model classes implementing this interface are JAXB-compatible.\n" +
@@ -1161,9 +1209,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 "    boolean isSetAttribute(String name);\n\n" +
                 "    /**\n" +
                 "     * Get all attribute names.\n" +
-                "     * @return A set of all attribute names\n" +
+                "     * @return A list of all attribute names\n" +
                 "     */\n" +
-                "    Set<String> getAttributeNames();\n\n" +
+                "    List<String> getAttributeNames();\n\n" +
                 "    /**\n" +
                 "     * Set an attribute value by name.\n" +
                 "     * @param name The attribute name\n" +
@@ -1201,7 +1249,31 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         content.append("}\n");
 
-        writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/model/ObjectFactory.java", content.toString());
+        String batchObjectFactoryPath = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + "/model/ObjectFactory.java";
+        writeFile(batchObjectFactoryPath, content.toString());
+    }
+
+    private void generateObjectFactory(String generatedTopLevelClassName, String outputDir, String packagePath) throws IOException {
+
+        StringBuilder content = new StringBuilder();
+        content.append("package ").append(packagePath).append("." + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) + ";\n\n");
+        content.append("import javax.xml.bind.JAXBElement;\n");
+        content.append("import javax.xml.bind.annotation.XmlElementDecl;\n");
+        content.append("import javax.xml.bind.annotation.XmlRegistry;\n");
+        content.append("import javax.validation.constraints.*;\n");
+        content.append("import javax.xml.namespace.QName;\n\n");
+
+        content.append("@XmlRegistry\n");
+        content.append("public class ObjectFactory {\n\n");
+
+        content.append("    public ObjectFactory() {\n");
+        content.append("    }\n\n");
+
+        generateObjectFactoryMethod(content, generatedTopLevelClassName);
+
+        content.append("}\n");
+
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) : "/model") + "/ObjectFactory.java", content.toString());
     }
 
     /**
@@ -1211,7 +1283,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     private void generateJaxbIndex(Set<String> generatedTopLevelClassNames, String outputDir, String packagePath) throws IOException {
         Set<String> classNames = collectJaxbModelClassNames(generatedTopLevelClassNames);
         String indexContent = String.join("\n", classNames);
-        String modelDir = outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/model";
+        String modelDir = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + "/model";
+        writeFile(modelDir + "/jaxb.index", indexContent);
+    }
+
+    private void generateJaxbIndex(String generatedTopLevelClassName, String outputDir, String packagePath) throws IOException {
+        String indexContent = String.join("\n", generatedTopLevelClassName);
+        String modelDir = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) : "/model");
         writeFile(modelDir + "/jaxb.index", indexContent);
     }
 
@@ -1750,6 +1828,16 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             }
         };
 
+        // Components: schemas
+        if (components != null) {
+            Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+            if (schemas != null) {
+                for (Object schemaObj : schemas.values()) {
+                    collectFromSchema.accept(schemaObj);
+                }
+            }
+        }
+
         // Components: responses
         if (components != null) {
             Map<String, Object> responses = Util.asStringObjectMap(components.get("responses"));
@@ -2279,7 +2367,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             addModelImportTypes(fieldType, schemaName, modelImports);
         }
 
-        content.append("package ").append(packagePath).append(".model;\n\n");
+        content.append("package ").append(packagePath).append(isModelsOnly?"."+schemaName.toLowerCase(Locale.ENGLISH)+";\n\n":".model;\n\n");
         content.append("import com.egain.platform.common.JAXBBean;\n");
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import javax.validation.constraints.*;\n");
@@ -2290,13 +2378,11 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("import java.util.Objects;\n");
         content.append("import java.util.List;\n");
         content.append("import java.util.ArrayList;\n");
-        content.append("import java.util.Set;\n");
-        content.append("import java.util.LinkedHashSet;\n");
         content.append("import java.util.Map;\n");
         content.append("import java.util.HashMap;\n");
         content.append("import javax.xml.datatype.XMLGregorianCalendar;\n");
         for (String typeName : modelImports) {
-            content.append("import ").append(packagePath).append(".model.").append(typeName).append(";\n");
+            content.append("import ").append(packagePath).append(isModelsOnly?"."+typeName.toLowerCase(Locale.ENGLISH)+".":".model.").append(typeName).append(";\n");
         }
         content.append("\n");
 
@@ -2514,8 +2600,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n\n");
 
         content.append("    @Override\n");
-        content.append("    public Set<String> getAttributeNames() {\n");
-        content.append("        Set<String> allNames = new LinkedHashSet<>();\n");
+        content.append("    public List<String> getAttributeNames() {\n");
+        content.append("        List<String> allNames = new ArrayList<>();\n");
         content.append("        if (attributes != null) {\n");
         content.append("            allNames.addAll(attributes.keySet());\n");
         content.append("        }\n");
@@ -2619,7 +2705,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n");
         content.append("}\n");
 
-        writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/model/" + schemaName + ".java", content.toString());
+        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly?"/"+schemaName.toLowerCase(Locale.ENGLISH)+"/":"/model/") + schemaName + ".java", content.toString());
     }
 
     /**
@@ -4363,21 +4449,21 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         String validatorPackagePath = validatorPackage.replace(".", "/");
 
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(validatorPackage).append(";\n\n");
+        content.append("package ").append(validatorPackage).append(".queryparamvalidators;\n\n");
         content.append("import com.egain.platform.framework.validation.ValidationBuilder;\n");
         content.append("import egain.ws.oas.RequestInfo;\n");
-        content.append("import ").append(validatorPackage).append(".AllowedParameterValidator;\n");
-        content.append("import ").append(validatorPackage).append(".ArrayMaxItemsValidators;\n");
-        content.append("import ").append(validatorPackage).append(".ArrayMinItemsValidator;\n");
-        content.append("import ").append(validatorPackage).append(".BooleanValidator;\n");
-        content.append("import ").append(validatorPackage).append(".EnumValidator;\n");
-        content.append("import ").append(validatorPackage).append(".FormatValidator;\n");
-        content.append("import ").append(validatorPackage).append(".IsRequiredValidator;\n");
-        content.append("import ").append(validatorPackage).append(".MaxLengthValidator;\n");
-        content.append("import ").append(validatorPackage).append(".MinLengthValidator;\n");
-        content.append("import ").append(validatorPackage).append(".NumericMaxValidator;\n");
-        content.append("import ").append(validatorPackage).append(".NumericMinValidator;\n");
-        content.append("import ").append(validatorPackage).append(".PatternValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.AllowedParameterValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.ArrayMaxItemsValidators;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.ArrayMinItemsValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.BooleanValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.EnumValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.FormatValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.IsRequiredValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.MaxLengthValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.MinLengthValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.NumericMaxValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.NumericMinValidator;\n");
+        content.append("import ").append(validatorPackage).append(".validationclasses.PatternValidator;\n");
         content.append("import java.lang.String;\n");
         content.append("import java.util.Collections;\n");
         content.append("import java.util.List;\n\n");
@@ -4391,7 +4477,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + "/src/main/java/" + validatorPackagePath + "/QueryParamValidators.java", content.toString());
+        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + validatorPackagePath + "/queryparamvalidators/QueryParamValidators.java", content.toString());
     }
 
     /**
@@ -4402,7 +4488,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         String validatorPackagePath = validatorPackage.replace(".", "/");
 
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(validatorPackage).append(";\n\n");
+        content.append("package ").append(validatorPackage).append(".validationmaphelper;\n\n");
         content.append("import com.egain.platform.framework.validation.ValidationBuilder;\n");
         content.append("import egain.ws.oas.RequestInfo;\n");
         content.append("import egain.ws.oas.Validations.ParameterValidatorMapKey;\n");
@@ -4447,7 +4533,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + "/src/main/java/" + validatorPackagePath + "/ValidationMapHelper.java", content.toString());
+        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + validatorPackagePath + "/validationmaphelper/ValidationMapHelper.java", content.toString());
     }
 
     /**
@@ -4458,9 +4544,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (outputDir == null) {
             throw new IllegalArgumentException("Output directory cannot be null");
         }
-        String validationPackage = packageName != null ? packageName : "egain.ws.oas.validation";
+        String validationPackage = packageName != null ? packageName + ".validationclasses" : "egain.ws.oas.validation";
         String packagePath = validationPackage.replace(".", "/");
-        String validationDir = outputDir + "/src/main/java/" + packagePath;
+        String validationDir = outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath;
 
         // Ensure target directory exists
         Files.createDirectories(Paths.get(validationDir));

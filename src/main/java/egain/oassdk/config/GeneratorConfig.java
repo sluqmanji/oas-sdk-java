@@ -29,6 +29,8 @@ public class GeneratorConfig {
     // ZIP-based spec loading: when set, specs and $ref resolution are read from this ZIP (entry paths use forward slashes)
     private String specZipPath;
 
+    private boolean modelsOnly; // If true, only generate models and skip executor/resources.
+
     /**
      * Default constructor
      */
@@ -106,6 +108,14 @@ public class GeneratorConfig {
 
     public void setOutputDir(String outputDir) {
         this.outputDir = outputDir;
+    }
+
+    public boolean isModelsOnly() {
+        return modelsOnly;
+    }
+
+    public void setModelsOnly(boolean modelsOnly) {
+        this.modelsOnly = modelsOnly;
     }
 
     public String getTemplatesDir() {
@@ -199,6 +209,7 @@ public class GeneratorConfig {
         private Map<String, List<String>> includeOperations = null;
         private List<String> searchPaths = null;
         private String specZipPath = null;
+        private boolean modelsOnly = false;
 
         public Builder language(String language) {
             this.language = language;
@@ -267,6 +278,11 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder modelsOnly(boolean modelsOnly) {
+            this.modelsOnly = modelsOnly;
+            return this;
+        }
+
         public GeneratorConfig build() {
             GeneratorConfig config = new GeneratorConfig(language, framework, packageName, version,
                     outputDir, templatesDir, customTemplates, additionalProperties);
@@ -274,6 +290,7 @@ public class GeneratorConfig {
             config.setIncludeOperations(includeOperations);
             config.setSearchPaths(searchPaths);
             config.setSpecZipPath(specZipPath);
+            config.setModelsOnly(modelsOnly);
             return config;
         }
     }
@@ -302,6 +319,7 @@ public class GeneratorConfig {
                 ", includeOperations=" + includeOperations +
                 ", searchPaths=" + searchPaths +
                 ", specZipPath=" + specZipPath +
+                ", modelsOnly=" + modelsOnly +
                 '}';
     }
 }
