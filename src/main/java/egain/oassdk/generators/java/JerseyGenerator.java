@@ -1189,7 +1189,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      */
     private void generateJAXBBeanInterface(String outputDir, String packagePath) throws IOException {
         String content = "package " + packagePath + ".model;\n\n" +
-                "import java.util.List;\n\n" +
+                "import java.util.Set;\n\n" +
                 "/**\n" +
                 " * Interface for JAXB beans with dynamic attribute support.\n" +
                 " * All model classes implementing this interface are JAXB-compatible.\n" +
@@ -1209,9 +1209,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 "    boolean isSetAttribute(String name);\n\n" +
                 "    /**\n" +
                 "     * Get all attribute names.\n" +
-                "     * @return A list of all attribute names\n" +
+                "     * @return A set of all attribute names\n" +
                 "     */\n" +
-                "    List<String> getAttributeNames();\n\n" +
+                "    Set<String> getAttributeNames();\n\n" +
                 "    /**\n" +
                 "     * Set an attribute value by name.\n" +
                 "     * @param name The attribute name\n" +
@@ -2378,6 +2378,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("import java.util.Objects;\n");
         content.append("import java.util.List;\n");
         content.append("import java.util.ArrayList;\n");
+        content.append("import java.util.Set;\n");
+        content.append("import java.util.LinkedHashSet;\n");
         content.append("import java.util.Map;\n");
         content.append("import java.util.HashMap;\n");
         content.append("import javax.xml.datatype.XMLGregorianCalendar;\n");
@@ -2600,8 +2602,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n\n");
 
         content.append("    @Override\n");
-        content.append("    public List<String> getAttributeNames() {\n");
-        content.append("        List<String> allNames = new ArrayList<>();\n");
+        content.append("    public Set<String> getAttributeNames() {\n");
+        content.append("        Set<String> allNames = new LinkedHashSet<>();\n");
         content.append("        if (attributes != null) {\n");
         content.append("            allNames.addAll(attributes.keySet());\n");
         content.append("        }\n");
@@ -4449,21 +4451,21 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         String validatorPackagePath = validatorPackage.replace(".", "/");
 
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(validatorPackage).append(".queryparamvalidators;\n\n");
+        content.append("package ").append(validatorPackage).append(";\n\n");
         content.append("import com.egain.platform.framework.validation.ValidationBuilder;\n");
         content.append("import egain.ws.oas.RequestInfo;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.AllowedParameterValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.ArrayMaxItemsValidators;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.ArrayMinItemsValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.BooleanValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.EnumValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.FormatValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.IsRequiredValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.MaxLengthValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.MinLengthValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.NumericMaxValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.NumericMinValidator;\n");
-        content.append("import ").append(validatorPackage).append(".validationclasses.PatternValidator;\n");
+        content.append("import ").append(validatorPackage).append(".AllowedParameterValidator;\n");
+        content.append("import ").append(validatorPackage).append(".ArrayMaxItemsValidators;\n");
+        content.append("import ").append(validatorPackage).append(".ArrayMinItemsValidator;\n");
+        content.append("import ").append(validatorPackage).append(".BooleanValidator;\n");
+        content.append("import ").append(validatorPackage).append(".EnumValidator;\n");
+        content.append("import ").append(validatorPackage).append(".FormatValidator;\n");
+        content.append("import ").append(validatorPackage).append(".IsRequiredValidator;\n");
+        content.append("import ").append(validatorPackage).append(".MaxLengthValidator;\n");
+        content.append("import ").append(validatorPackage).append(".MinLengthValidator;\n");
+        content.append("import ").append(validatorPackage).append(".NumericMaxValidator;\n");
+        content.append("import ").append(validatorPackage).append(".NumericMinValidator;\n");
+        content.append("import ").append(validatorPackage).append(".PatternValidator;\n");
         content.append("import java.lang.String;\n");
         content.append("import java.util.Collections;\n");
         content.append("import java.util.List;\n\n");
@@ -4477,7 +4479,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + validatorPackagePath + "/queryparamvalidators/QueryParamValidators.java", content.toString());
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/QueryParamValidators.java", content.toString());
     }
 
     /**
@@ -4488,7 +4490,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         String validatorPackagePath = validatorPackage.replace(".", "/");
 
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(validatorPackage).append(".validationmaphelper;\n\n");
+        content.append("package ").append(validatorPackage).append(";\n\n");
         content.append("import com.egain.platform.framework.validation.ValidationBuilder;\n");
         content.append("import egain.ws.oas.RequestInfo;\n");
         content.append("import egain.ws.oas.Validations.ParameterValidatorMapKey;\n");
@@ -4533,7 +4535,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + validatorPackagePath + "/validationmaphelper/ValidationMapHelper.java", content.toString());
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/ValidationMapHelper.java", content.toString());
     }
 
     /**
@@ -4544,9 +4546,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (outputDir == null) {
             throw new IllegalArgumentException("Output directory cannot be null");
         }
-        String validationPackage = packageName != null ? packageName + ".validationclasses" : "egain.ws.oas.validation";
+        String validationPackage = packageName != null ? packageName : "egain.ws.oas.validation";
         String packagePath = validationPackage.replace(".", "/");
-        String validationDir = outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath;
+        String validationDir = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath;
 
         // Ensure target directory exists
         Files.createDirectories(Paths.get(validationDir));
