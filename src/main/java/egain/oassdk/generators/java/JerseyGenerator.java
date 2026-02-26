@@ -41,7 +41,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         try {
             currentSpecForResolution.set(spec);
-            this.isModelsOnly = config.isModelsOnly();
+            this.isModelsOnly = config != null && config.isModelsOnly();
             // Create directory structure for full generation; models-only relies on writeFile creating parent dirs
             if (!isModelsOnly) {
                 createDirectoryStructure(outputDir, packageName);
