@@ -545,7 +545,7 @@ public class JerseyGeneratorValidationTest {
         // isSetAttribute must not include readOnly property (id) in its switch
         String isSetAttributeSection = content.substring(
             content.indexOf("public boolean isSetAttribute"),
-            content.indexOf("public Set<String> getAttributeNames()"));
+            content.indexOf("public List<String> getAttributeNames()"));
         assertFalse(isSetAttributeSection.contains("case \"id\":"),
             "isSetAttribute should not have a case for readOnly property id");
 
@@ -558,7 +558,7 @@ public class JerseyGeneratorValidationTest {
 
         // getAttributeNames must not add writeOnly property (password)
         String getAttributeNamesSection = content.substring(
-            content.indexOf("public Set<String> getAttributeNames()"),
+            content.indexOf("public List<String> getAttributeNames()"),
             content.indexOf("public void setAttribute"));
         assertFalse(getAttributeNamesSection.contains("allNames.add(\"password\")"),
             "getAttributeNames should not include writeOnly property password");
