@@ -2393,7 +2393,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         if (!fieldNames.isEmpty()) {
             for (int i = 0; i < fieldNames.size(); i++) {
-                content.append("    \"").append(toCamelCase(fieldNames.get(i))).append("\"");
+                content.append("    \"").append(toPropOrderName(toModelFieldName(fieldNames.get(i)))).append("\"");
                 if (i < fieldNames.size() - 1) {
                     content.append(",\n");
                 } else {
@@ -2410,7 +2410,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         // Add field for dynamic attributes (excluded from JAXB binding)
         content.append("    @XmlTransient\n");
-        content.append("    private Map<String, Object> attributes;\n\n");
+        content.append("    private Map<String, Object> _attributes;\n\n");
 
         // Generate fields
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
@@ -2420,7 +2420,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             content.append("    ");
 
             // Add JAXB @XmlElement annotation
-            String javaFieldName = toCamelCase(fieldName);
+            String javaFieldName = toModelFieldName(fieldName);
             String fieldType = computeFieldTypeForProperty(fieldName, fieldSchema, isArrayType, spec);
 
             // Handle arrays/lists with @XmlElementWrapper
@@ -2471,8 +2471,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
             String fieldType = computeFieldTypeForProperty(fieldName, fieldSchema, isArrayType, spec);
 
-            String javaFieldName = toCamelCase(fieldName);
-            String capitalizedFieldName = capitalize(javaFieldName);
+            String javaFieldName = toModelFieldName(fieldName);
+            String capitalizedFieldName = getCapitalizedPropertyNameForAccessor(javaFieldName);
 
             boolean readOnly = isSchemaFlagTrue(fieldSchema, "readOnly");
             boolean writeOnly = isSchemaFlagTrue(fieldSchema, "writeOnly");
@@ -2504,7 +2504,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (!fieldNames.isEmpty()) {
             for (int i = 0; i < fieldNames.size(); i++) {
                 if (i > 0) content.append("                ");
-                content.append("Objects.equals(").append(toCamelCase(fieldNames.get(i))).append(", that.").append(toCamelCase(fieldNames.get(i))).append(")");
+                String modelField = toModelFieldName(fieldNames.get(i));
+                content.append("Objects.equals(").append(modelField).append(", that.").append(modelField).append(")");
                 if (i < fieldNames.size() - 1) {
                     content.append(" &&\n");
                 } else {
@@ -2523,7 +2524,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (!fieldNames.isEmpty()) {
             for (int i = 0; i < fieldNames.size(); i++) {
                 if (i > 0) content.append(", ");
-                content.append(toCamelCase(fieldNames.get(i)));
+                content.append(toModelFieldName(fieldNames.get(i)));
             }
         }
         content.append(");\n");
@@ -2537,7 +2538,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (!fieldNames.isEmpty()) {
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
-                String javaFieldName = toCamelCase(fieldName);
+                String javaFieldName = toModelFieldName(fieldName);
                 content.append("                \"").append(javaFieldName).append("=\" + ").append(javaFieldName);
                 if (i < fieldNames.size() - 1) {
                     content.append(" + \", \" +\n");
@@ -2555,14 +2556,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    public Object getAttribute(String name) {\n");
         // First check attributes map, then check fields
         if (!fieldNames.isEmpty()) {
-            content.append("        if (attributes != null && attributes.containsKey(name)) {\n");
-            content.append("            return attributes.get(name);\n");
+            content.append("        if (_attributes != null && _attributes.containsKey(name)) {\n");
+            content.append("            return _attributes.get(name);\n");
             content.append("        }\n");
             content.append("        switch (name) {\n");
             for (String fieldName : fieldNames) {
                 Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
                 if (isSchemaFlagTrue(fieldSchema, "writeOnly")) continue;
-                String javaFieldName = toCamelCase(fieldName);
+                String javaFieldName = toModelFieldName(fieldName);
                 content.append("            case \"").append(fieldName).append("\":\n");
                 content.append("                return ").append(javaFieldName).append(";\n");
             }
@@ -2570,15 +2571,15 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             content.append("                return null;\n");
             content.append("        }\n");
         } else {
-            content.append("        if (attributes == null) return null;\n");
-            content.append("        return attributes.get(name);\n");
+            content.append("        if (_attributes == null) return null;\n");
+            content.append("        return _attributes.get(name);\n");
         }
         content.append("    }\n\n");
 
         content.append("    @Override\n");
         content.append("    public boolean isSetAttribute(String name) {\n");
         // Check attributes map first
-        content.append("        if (attributes != null && attributes.containsKey(name)) {\n");
+        content.append("        if (_attributes != null && _attributes.containsKey(name)) {\n");
         content.append("            return true;\n");
         content.append("        }\n");
         // Then check if it's a field and if it's set (not null)
@@ -2587,7 +2588,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             for (String fieldName : fieldNames) {
                 Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
                 if (isSchemaFlagTrue(fieldSchema, "readOnly")) continue;
-                String javaFieldName = toCamelCase(fieldName);
+                String javaFieldName = toModelFieldName(fieldName);
                 content.append("            case \"").append(fieldName).append("\":\n");
                 content.append("                return ").append(javaFieldName).append(" != null;\n");
             }
@@ -2602,8 +2603,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    @Override\n");
         content.append("    public List<String> getAttributeNames() {\n");
         content.append("        List<String> allNames = new ArrayList<>();\n");
-        content.append("        if (attributes != null) {\n");
-        content.append("            allNames.addAll(attributes.keySet());\n");
+        content.append("        if (_attributes != null) {\n");
+        content.append("            allNames.addAll(_attributes.keySet());\n");
         content.append("        }\n");
         // Add field names to the set (exclude writeOnly - not exposed as readable attributes)
         if (!fieldNames.isEmpty()) {
@@ -2622,8 +2623,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         if (!fieldNames.isEmpty()) {
             content.append("        switch (name) {\n");
             for (String fieldName : fieldNames) {
-                String javaFieldName = toCamelCase(fieldName);
-                String capitalizedFieldName = capitalize(javaFieldName);
+                String javaFieldName = toModelFieldName(fieldName);
+                String capitalizedFieldName = getCapitalizedPropertyNameForAccessor(javaFieldName);
                 Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
                 String fieldType;
                 
@@ -2690,17 +2691,17 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 }
             }
             content.append("            default:\n");
-            content.append("                if (attributes == null) {\n");
-            content.append("                    attributes = new HashMap<>();\n");
+            content.append("                if (_attributes == null) {\n");
+            content.append("                    _attributes = new HashMap<>();\n");
             content.append("                }\n");
-            content.append("                attributes.put(name, value);\n");
+            content.append("                _attributes.put(name, value);\n");
             content.append("                break;\n");
             content.append("        }\n");
         } else {
-            content.append("        if (attributes == null) {\n");
-            content.append("            attributes = new HashMap<>();\n");
+            content.append("        if (_attributes == null) {\n");
+            content.append("            _attributes = new HashMap<>();\n");
             content.append("        }\n");
-            content.append("        attributes.put(name, value);\n");
+            content.append("        _attributes.put(name, value);\n");
         }
         content.append("    }\n");
         content.append("}\n");
@@ -3982,6 +3983,37 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
 		return "_"+name;
 	}
+
+    /**
+     * Convert OpenAPI property name to a valid Java field name for model classes.
+     * Prepends underscore if the camelCase form is a Java keyword (e.g. "case" -> "_case").
+     */
+    private String toModelFieldName(String openApiPropertyName) {
+        String camel = toCamelCase(openApiPropertyName);
+        return (camel != null && isJavaKeyword(camel)) ? "_" + camel : camel;
+    }
+
+    /**
+     * Return the capitalized bean property name for getter/setter method names.
+     * Strips leading underscore so getCase/setCase are used instead of get_Case/set_Case.
+     */
+    private String getCapitalizedPropertyNameForAccessor(String javaFieldName) {
+        if (javaFieldName == null || javaFieldName.isEmpty()) {
+            return javaFieldName;
+        }
+        String base = javaFieldName.startsWith("_") ? javaFieldName.substring(1) : javaFieldName;
+        return capitalize(base);
+    }
+
+    /**
+     * Return the name to use in JAXB propOrder (bean property name without leading underscore).
+     */
+    private String toPropOrderName(String javaFieldName) {
+        if (javaFieldName != null && javaFieldName.startsWith("_")) {
+            return javaFieldName.substring(1);
+        }
+        return javaFieldName;
+    }
 
     /**
      * Sanitize parameter name to be a valid Java identifier
