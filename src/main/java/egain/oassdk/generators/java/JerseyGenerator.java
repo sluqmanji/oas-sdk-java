@@ -1189,7 +1189,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
      */
     private void generateJAXBBeanInterface(String outputDir, String packagePath) throws IOException {
         String content = "package " + packagePath + ".model;\n\n" +
-                "import java.util.Set;\n\n" +
+                "import java.util.List;\n\n" +
                 "/**\n" +
                 " * Interface for JAXB beans with dynamic attribute support.\n" +
                 " * All model classes implementing this interface are JAXB-compatible.\n" +
@@ -1209,9 +1209,9 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 "    boolean isSetAttribute(String name);\n\n" +
                 "    /**\n" +
                 "     * Get all attribute names.\n" +
-                "     * @return A set of all attribute names\n" +
+                "     * @return A list of all attribute names\n" +
                 "     */\n" +
-                "    Set<String> getAttributeNames();\n\n" +
+                "    List<String> getAttributeNames();\n\n" +
                 "    /**\n" +
                 "     * Set an attribute value by name.\n" +
                 "     * @param name The attribute name\n" +
@@ -1256,7 +1256,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     private void generateObjectFactory(String generatedTopLevelClassName, String outputDir, String packagePath) throws IOException {
 
         StringBuilder content = new StringBuilder();
-        content.append("package ").append(packagePath).append("." + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) + ";\n\n");
+        content.append("package ").append(packagePath).append("." + sanitizePackageName(generatedTopLevelClassName) + ";\n\n");
         content.append("import javax.xml.bind.JAXBElement;\n");
         content.append("import javax.xml.bind.annotation.XmlElementDecl;\n");
         content.append("import javax.xml.bind.annotation.XmlRegistry;\n");
@@ -1273,7 +1273,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         content.append("}\n");
 
-        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) : "/model") + "/ObjectFactory.java", content.toString());
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + sanitizePackageName(generatedTopLevelClassName) : "/model") + "/ObjectFactory.java", content.toString());
     }
 
     /**
@@ -1289,7 +1289,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
     private void generateJaxbIndex(String generatedTopLevelClassName, String outputDir, String packagePath) throws IOException {
         String indexContent = String.join("\n", generatedTopLevelClassName);
-        String modelDir = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + generatedTopLevelClassName.toLowerCase(Locale.ENGLISH) : "/model");
+        String modelDir = outputDir + (isModelsOnly ? "/" : "/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly ? "/" + sanitizePackageName(generatedTopLevelClassName) : "/model");
         writeFile(modelDir + "/jaxb.index", indexContent);
     }
 
@@ -2367,7 +2367,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             addModelImportTypes(fieldType, schemaName, modelImports);
         }
 
-        content.append("package ").append(packagePath).append(isModelsOnly?"."+schemaName.toLowerCase(Locale.ENGLISH)+";\n\n":".model;\n\n");
+        content.append("package ").append(packagePath).append(isModelsOnly?"."+sanitizePackageName(schemaName)+";\n\n":".model;\n\n");
         content.append("import com.egain.platform.common.JAXBBean;\n");
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import javax.validation.constraints.*;\n");
@@ -2378,13 +2378,11 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("import java.util.Objects;\n");
         content.append("import java.util.List;\n");
         content.append("import java.util.ArrayList;\n");
-        content.append("import java.util.Set;\n");
-        content.append("import java.util.LinkedHashSet;\n");
         content.append("import java.util.Map;\n");
         content.append("import java.util.HashMap;\n");
         content.append("import javax.xml.datatype.XMLGregorianCalendar;\n");
         for (String typeName : modelImports) {
-            content.append("import ").append(packagePath).append(isModelsOnly?"."+typeName.toLowerCase(Locale.ENGLISH)+".":".model.").append(typeName).append(";\n");
+            content.append("import ").append(packagePath).append(isModelsOnly?"."+sanitizePackageName(typeName)+".":".model.").append(typeName).append(";\n");
         }
         content.append("\n");
 
@@ -2602,8 +2600,8 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n\n");
 
         content.append("    @Override\n");
-        content.append("    public Set<String> getAttributeNames() {\n");
-        content.append("        Set<String> allNames = new LinkedHashSet<>();\n");
+        content.append("    public List<String> getAttributeNames() {\n");
+        content.append("        List<String> allNames = new ArrayList<>();\n");
         content.append("        if (attributes != null) {\n");
         content.append("            allNames.addAll(attributes.keySet());\n");
         content.append("        }\n");
@@ -2707,7 +2705,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    }\n");
         content.append("}\n");
 
-        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly?"/"+schemaName.toLowerCase(Locale.ENGLISH)+"/":"/model/") + schemaName + ".java", content.toString());
+        writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly?"/"+sanitizePackageName(schemaName)+"/":"/model/") + schemaName + ".java", content.toString());
     }
 
     /**
@@ -3971,6 +3969,19 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 lowerName.contains("exception") ||
                 lowerName.contains("fault");
     }
+
+	private String sanitizePackageName(String name){
+		if (name == null || name.isEmpty()) {
+			return null;
+		}
+		name = name.toLowerCase(Locale.ENGLISH);
+
+		if (!isJavaKeyword(name)) {
+			return name;
+		}
+
+		return "_"+name;
+	}
 
     /**
      * Sanitize parameter name to be a valid Java identifier

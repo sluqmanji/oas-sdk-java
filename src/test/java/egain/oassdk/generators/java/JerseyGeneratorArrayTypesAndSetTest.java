@@ -10,15 +10,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Test cases for JerseyGenerator fixes:
  * 1. Generate model classes for array types referenced in responses
- * 2. getAttributeNames() returns Set<String> instead of List<String>
+ * 2. getAttributeNames() returns List<String>
  */
-@DisplayName("JerseyGenerator Array Types and Set Return Type Tests")
+@DisplayName("JerseyGenerator Array Types and List Return Type Tests")
 public class JerseyGeneratorArrayTypesAndSetTest {
     
     @TempDir
@@ -110,8 +109,8 @@ public class JerseyGeneratorArrayTypesAndSetTest {
     }
     
     @Test
-    @DisplayName("Test that getAttributeNames() returns Set<String> in generated models")
-    public void testGetAttributeNamesReturnsSet() throws OASSDKException, IOException {
+    @DisplayName("Test that getAttributeNames() returns List<String> in generated models")
+    public void testGetAttributeNamesReturnsList() throws OASSDKException, IOException {
         String yamlFile = "src/test/resources/openapi3.yaml";
         Path outputDir = tempOutputDir.resolve("generated-sdk");
         String packageName = "com.test.api";
@@ -140,8 +139,8 @@ public class JerseyGeneratorArrayTypesAndSetTest {
         
         assertFalse(modelFiles.isEmpty(), "At least one model file should be generated");
         
-        int filesWithSetReturnType = 0;
         int filesWithListReturnType = 0;
+        int filesWithSetReturnType = 0;
         
         for (Path modelFile : modelFiles) {
             String content = Files.readString(modelFile);
@@ -149,32 +148,32 @@ public class JerseyGeneratorArrayTypesAndSetTest {
             
             // Check if getAttributeNames() method exists
             if (content.contains("getAttributeNames()")) {
-                // Should return Set<String>
-                boolean hasSetReturnType = content.contains("public Set<String> getAttributeNames()");
-                // Should NOT return List<String>
+                // Should return List<String>
                 boolean hasListReturnType = content.contains("public List<String> getAttributeNames()");
+                // Should NOT return Set<String>
+                boolean hasSetReturnType = content.contains("public Set<String> getAttributeNames()");
                 
-                if (hasSetReturnType) {
-                    filesWithSetReturnType++;
-                    // Verify Set import
-                    assertTrue(content.contains("import java.util.Set") || 
-                              content.contains("import java.util.*"),
-                        fileName + " should import Set");
-                    // Verify LinkedHashSet usage
-                    assertTrue(content.contains("LinkedHashSet") || 
-                              content.contains("new LinkedHashSet"),
-                        fileName + " should use LinkedHashSet");
-                } else if (hasListReturnType) {
+                if (hasListReturnType) {
                     filesWithListReturnType++;
-                    fail(fileName + " should return Set<String>, not List<String>");
+                    // Verify List import
+                    assertTrue(content.contains("import java.util.List") ||
+                              content.contains("import java.util.*"),
+                        fileName + " should import List");
+                    // Verify ArrayList usage
+                    assertTrue(content.contains("ArrayList") ||
+                              content.contains("new ArrayList"),
+                        fileName + " should use ArrayList");
+                } else if (hasSetReturnType) {
+                    filesWithSetReturnType++;
+                    fail(fileName + " should return List<String>, not Set<String>");
                 }
             }
         }
         
-        assertTrue(filesWithSetReturnType > 0, 
-            "At least one model should have getAttributeNames() returning Set<String>");
-        assertEquals(0, filesWithListReturnType,
-            "No models should have getAttributeNames() returning List<String>");
+        assertTrue(filesWithListReturnType > 0,
+            "At least one model should have getAttributeNames() returning List<String>");
+        assertEquals(0, filesWithSetReturnType,
+            "No models should have getAttributeNames() returning Set<String>");
     }
     
     @Test
@@ -253,8 +252,8 @@ public class JerseyGeneratorArrayTypesAndSetTest {
     }
     
     @Test
-    @DisplayName("Test that getAttributeNames() uses LinkedHashSet in implementation")
-    public void testGetAttributeNamesUsesLinkedHashSet() throws OASSDKException, IOException {
+    @DisplayName("Test that getAttributeNames() uses ArrayList in implementation")
+    public void testGetAttributeNamesUsesArrayList() throws OASSDKException, IOException {
         String yamlFile = "src/test/resources/openapi3.yaml";
         Path outputDir = tempOutputDir.resolve("generated-sdk");
         String packageName = "com.test.api";
@@ -280,34 +279,34 @@ public class JerseyGeneratorArrayTypesAndSetTest {
             .filter(path -> !path.getFileName().toString().equals("JAXBBean.java"))
             .collect(Collectors.toList());
         
-        boolean foundLinkedHashSet = false;
+        boolean foundArrayList = false;
         
         for (Path modelFile : modelFiles) {
             String content = Files.readString(modelFile);
             
             if (content.contains("getAttributeNames()")) {
-                // Should use LinkedHashSet
-                if (content.contains("new LinkedHashSet") || 
-                    content.contains("LinkedHashSet<String>")) {
-                    foundLinkedHashSet = true;
+                // Should use ArrayList
+                if (content.contains("new ArrayList") ||
+                    content.contains("ArrayList<String>")) {
+                    foundArrayList = true;
                     
                     // Verify import
-                    assertTrue(content.contains("import java.util.LinkedHashSet") ||
+                    assertTrue(content.contains("import java.util.ArrayList") ||
                               content.contains("import java.util.*"),
-                        modelFile.getFileName() + " should import LinkedHashSet");
+                        modelFile.getFileName() + " should import ArrayList");
                     
-                    // Verify Set import
-                    assertTrue(content.contains("import java.util.Set") ||
+                    // Verify List import
+                    assertTrue(content.contains("import java.util.List") ||
                               content.contains("import java.util.*"),
-                        modelFile.getFileName() + " should import Set");
+                        modelFile.getFileName() + " should import List");
                     
                     break;
                 }
             }
         }
         
-        assertTrue(foundLinkedHashSet, 
-            "At least one model should use LinkedHashSet in getAttributeNames()");
+        assertTrue(foundArrayList,
+            "At least one model should use ArrayList in getAttributeNames()");
     }
     
     @Test
