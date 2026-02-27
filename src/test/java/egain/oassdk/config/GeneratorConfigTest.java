@@ -24,6 +24,28 @@ public class GeneratorConfigTest {
         assertNotNull(config.getAdditionalProperties());
         assertNull(config.getIncludePaths());
         assertNull(config.getIncludeOperations());
+        assertFalse(config.isModelsOnly());
+        assertNull(config.getSpecZipPath());
+    }
+    
+    @Test
+    public void testModelsOnlyGetterAndSetter() {
+        GeneratorConfig config = new GeneratorConfig();
+        assertFalse(config.isModelsOnly());
+        config.setModelsOnly(true);
+        assertTrue(config.isModelsOnly());
+        config.setModelsOnly(false);
+        assertFalse(config.isModelsOnly());
+    }
+    
+    @Test
+    public void testSpecZipPathGetterAndSetter() {
+        GeneratorConfig config = new GeneratorConfig();
+        assertNull(config.getSpecZipPath());
+        config.setSpecZipPath("/path/to/specs.zip");
+        assertEquals("/path/to/specs.zip", config.getSpecZipPath());
+        config.setSpecZipPath(null);
+        assertNull(config.getSpecZipPath());
     }
     
     @Test
@@ -155,6 +177,24 @@ public class GeneratorConfigTest {
             .build();
         
         assertEquals(operations, config.getIncludeOperations());
+    }
+    
+    @Test
+    public void testBuilderWithModelsOnly() {
+        GeneratorConfig config = GeneratorConfig.builder()
+            .modelsOnly(true)
+            .build();
+        assertTrue(config.isModelsOnly());
+        config = GeneratorConfig.builder().modelsOnly(false).build();
+        assertFalse(config.isModelsOnly());
+    }
+    
+    @Test
+    public void testBuilderWithSpecZipPath() {
+        GeneratorConfig config = GeneratorConfig.builder()
+            .specZipPath("test/lib/platform-api-interfaces.zip")
+            .build();
+        assertEquals("test/lib/platform-api-interfaces.zip", config.getSpecZipPath());
     }
     
     @Test

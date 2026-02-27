@@ -58,22 +58,28 @@ public class OASSDKCLI implements Callable<Integer> {
                 description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
         private List<String> searchPaths;
 
+        @Option(names = {"--spec-zip"}, description = "Path to ZIP file containing specs; specPath is then an entry path inside the ZIP")
+        private String specZipPath;
+
         @Override
         public Integer call() {
             try {
                 // Build configuration from CLI params (config file loading not yet implemented)
-                GeneratorConfig generatorConfig = GeneratorConfig.builder()
+                GeneratorConfig.Builder configBuilder = GeneratorConfig.builder()
                         .language(language)
                         .framework(framework)
                         .packageName(packageName)
                         .outputDir(output)
-                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
-                        .build();
+                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null);
+                if (specZipPath != null && !specZipPath.isEmpty()) {
+                    configBuilder.specZipPath(specZipPath);
+                }
+                GeneratorConfig generatorConfig = configBuilder.build();
 
                 // Initialize SDK
                 OASSDK sdk = new OASSDK(generatorConfig, null, null);
 
-                // Load specification
+                // Load specification (filesystem path or ZIP entry path when specZipPath is set)
                 sdk.loadSpec(specPath);
 
                 // Generate application

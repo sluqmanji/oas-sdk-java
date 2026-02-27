@@ -9,8 +9,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Comprehensive test class for OASSDK
@@ -386,5 +390,46 @@ public class OASSDKTest {
         Map<String, Object> metadata = sdk.getMetadata();
         assertNotNull(metadata);
         assertTrue(metadata.containsKey("basic_info"));
+    }
+
+    /**
+     * Creates a temporary ZIP file containing a single OpenAPI spec entry.
+     * Caller is responsible for deleting the zip path when done.
+     */
+    private static Path createTempZipWithSpec(Path tempDir, String entryName, String yamlContent) throws Exception {
+        Path zipPath = tempDir.resolve("specs.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+            ZipEntry e = new ZipEntry(entryName);
+            zos.putNextEntry(e);
+            zos.write(yamlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zos.closeEntry();
+        }
+        return zipPath;
+    }
+
+    @Test
+    public void testLoadSpecFromZipAndClose(@TempDir Path tempDir) throws Exception {
+        String yaml = "openapi: 3.0.0\n"
+                + "info:\n  title: Zip API\n  version: 1.0.0\n"
+                + "paths:\n  /ping:\n    get:\n      operationId: ping\n      responses:\n        '200':\n          description: OK\n";
+        Path zipPath = createTempZipWithSpec(tempDir, "api.yaml", yaml);
+        GeneratorConfig config = GeneratorConfig.builder()
+                .specZipPath(zipPath.toString())
+                .build();
+
+        try (OASSDK zipSdk = new OASSDK(config, null, null)) {
+            zipSdk.loadSpec("api.yaml");
+            Map<String, Object> metadata = zipSdk.getMetadata();
+            assertNotNull(metadata);
+        }
+        // close() called by try-with-resources; no exception
+    }
+
+    @Test
+    public void testOASSDKWithZipInvalidPathThrows() {
+        GeneratorConfig config = GeneratorConfig.builder()
+                .specZipPath("nonexistent/path/to/specs.zip")
+                .build();
+        assertThrows(RuntimeException.class, () -> new OASSDK(config, null, null));
     }
 }
