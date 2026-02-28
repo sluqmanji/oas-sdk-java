@@ -56,15 +56,15 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // Generate query parameter validators
             generateQueryParamValidators(spec, outputDir, packageName);
 
-            // Generate Validation classes automatically
-            generateValidationClasses(outputDir, packageName);
-
             if (!isModelsOnly) {
                 // Generate main application class
                 generateMainApplicationClass(spec, outputDir, packageName);
 
                 // Generate resources (controllers in Jersey terminology)
                 generateResources(spec, outputDir, packageName);
+
+				// Generate Validation classes automatically
+				generateValidationClasses(outputDir, packageName);
 
                 // Generate services
                 generateServices(outputDir, packageName);
@@ -3421,16 +3421,21 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
             // Handle integer validations
             case "integer" -> {
+				String format = (String) schema.get("format");
+				boolean isLongValue = "int64".equals(format);
                 // Minimum
                 Object minimumObj = schema.get("minimum");
                 if (minimumObj != null) {
                     long minimum = getLongValue(minimumObj);
                     boolean exclusiveMinimum = Boolean.TRUE.equals(schema.get("exclusiveMinimum"));
                     if (exclusiveMinimum) {
-                        annotations.append("@Min(value = ").append(minimum + 1).append(")\n    ");
-                    } else {
-                        annotations.append("@Min(value = ").append(minimum).append(")\n    ");
+						++minimum;
                     }
+					if(isLongValue){
+						annotations.append("@DecimalMin(value = \"").append(minimum).append("\")\n    ");
+					}else{
+						annotations.append("@Min(value = ").append(minimum).append(")\n    ");
+					}
                 }
 
                 // Maximum
@@ -3439,10 +3444,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     long maximum = getLongValue(maximumObj);
                     boolean exclusiveMaximum = Boolean.TRUE.equals(schema.get("exclusiveMaximum"));
                     if (exclusiveMaximum) {
-                        annotations.append("@Max(value = ").append(maximum - 1).append(")\n    ");
-                    } else {
-                        annotations.append("@Max(value = ").append(maximum).append(")\n    ");
+                        --maximum;
                     }
+					if(isLongValue){
+						annotations.append("@DecimalMax(value = \"").append(maximum).append("\")\n    ");
+					}else{
+						annotations.append("@Max(value = ").append(maximum).append(")\n    ");
+					}
                 }
 
                 // Positive/negative constraints
@@ -4522,7 +4530,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/QueryParamValidators.java", content.toString());
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/QueryParamValidators."+(isModelsOnly?"txt":"java"), content.toString());
     }
 
     /**
@@ -4578,7 +4586,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         // Write to proper package directory under src/main/java
-        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/ValidationMapHelper.java", content.toString());
+        writeFile(outputDir + (isModelsOnly ? "/" : "/src/main/java/") + validatorPackagePath + "/ValidationMapHelper."+(isModelsOnly?"txt":"java"), content.toString());
     }
 
     /**
