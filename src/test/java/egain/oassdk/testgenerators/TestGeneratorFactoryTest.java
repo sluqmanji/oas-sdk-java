@@ -142,5 +142,83 @@ public class TestGeneratorFactoryTest {
         assertTrue(factory.isSupported("Integration"));
         assertTrue(factory.isSupported("NFR"));
     }
+
+    @Test
+    public void testGetUnitTestGenerator_WithPythonConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("python")
+                .framework("pytest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("unit", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.python.PytestUnitTestGenerator);
+    }
+
+    @Test
+    public void testGetIntegrationTestGenerator_WithPythonConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("python")
+                .framework("pytest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("integration", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.python.PytestIntegrationTestGenerator);
+    }
+
+    @Test
+    public void testGetUnitTestGenerator_WithNodejsConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("nodejs")
+                .framework("jest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("unit", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.nodejs.JestUnitTestGenerator);
+    }
+
+    @Test
+    public void testGetUnitTestGenerator_WithJavaScriptConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("javascript")
+                .framework("jest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("unit", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.nodejs.JestUnitTestGenerator);
+    }
+
+    @Test
+    public void testGetIntegrationTestGenerator_WithNodejsConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("nodejs")
+                .framework("jest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("integration", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.nodejs.JestIntegrationTestGenerator);
+    }
+
+    @Test
+    public void testGetIntegrationTestGenerator_WithJavaScriptConfig() {
+        TestConfig config = TestConfig.builder()
+                .language("javascript")
+                .framework("jest")
+                .build();
+
+        TestGenerator generator = factory.getGenerator("integration", config);
+
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.nodejs.JestIntegrationTestGenerator);
+    }
 }
 
