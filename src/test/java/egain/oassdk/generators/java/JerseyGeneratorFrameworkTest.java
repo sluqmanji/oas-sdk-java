@@ -526,4 +526,85 @@ public class JerseyGeneratorFrameworkTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("Test inline object properties generate static inner classes")
+    public void testInlineObjectPropertiesGenerateInnerClasses() throws OASSDKException, IOException {
+        String yamlContent = """
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            servers:
+              - url: https://api.example.com/v1
+            paths:
+              /export:
+                post:
+                  summary: Export
+                  operationId: postExport
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/KnowledgeExport'
+                  responses:
+                    '200':
+                      description: OK
+            components:
+              schemas:
+                KnowledgeExport:
+                  type: object
+                  required: [portalID, language, dataDestination]
+                  properties:
+                    portalID:
+                      type: string
+                    language:
+                      type: object
+                      title: language
+                      required: [code]
+                      properties:
+                        code:
+                          type: string
+                          enum: [en-US, fr-FR]
+                    dataDestination:
+                      type: object
+                      properties:
+                        destinationType:
+                          type: string
+                          enum: [AWS S3 bucket, SFTP server]
+                        path:
+                          type: string
+            """;
+
+        Path testSpecFile = tempOutputDir.resolve("inline-object-spec.yaml");
+        Files.writeString(testSpecFile, yamlContent);
+
+        Path outputDir = tempOutputDir.resolve("inline-inner-sdk");
+        String packageName = "com.test.api";
+
+        OASSDK sdk = new OASSDK();
+        sdk.loadSpec(testSpecFile.toString());
+        sdk.generateApplication("java", "jersey", packageName, outputDir.toString());
+
+        Path modelFile = outputDir.resolve("src/main/java/" + packageName.replace(".", "/") + "/model/KnowledgeExport.java");
+        assertTrue(Files.exists(modelFile), "KnowledgeExport model should be generated");
+
+        String content = Files.readString(modelFile);
+
+        // Field types should be inner classes, not Object
+        assertTrue(content.contains("KnowledgeExport.Language language") || content.contains("KnowledgeExport.Language language;"),
+            "language field should use inner class type KnowledgeExport.Language");
+        assertTrue(content.contains("KnowledgeExport.DataDestination dataDestination") || content.contains("KnowledgeExport.DataDestination dataDestination;"),
+            "dataDestination field should use inner class type KnowledgeExport.DataDestination");
+
+        // Static inner classes should be present
+        assertTrue(content.contains("public static class Language"),
+            "Static inner class Language should be generated");
+        assertTrue(content.contains("public static class DataDestination"),
+            "Static inner class DataDestination should be generated");
+
+        // Inner class should have its property (e.g. Language has code)
+        assertTrue(content.contains("private String code") || content.contains("protected String code"),
+            "Language inner class should have code field");
+    }
 }

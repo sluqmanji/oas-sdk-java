@@ -991,6 +991,46 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     }
 
     /**
+     * Returns true if the given property schema is an inline object (not a $ref, not a top-level schema, not composition-only).
+     * Such properties will be generated as static inner classes of the parent model.
+     */
+    private boolean isInlineObjectProperty(Map<String, Object> fieldSchema, Map<String, Object> spec) {
+        if (fieldSchema == null || spec == null) return false;
+        if (!"object".equals(fieldSchema.get("type"))) return false;
+        Map<String, Object> props = Util.asStringObjectMap(fieldSchema.get("properties"));
+        if (props == null || props.isEmpty()) return false;
+        if (fieldSchema.containsKey("$ref")) return false;
+        // Not a top-level schema: schema must not be the same object as any component schema
+        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+        if (components != null) {
+            Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
+            if (schemas != null) {
+                for (Object schemaObj : schemas.values()) {
+                    if (schemaObj == fieldSchema) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Java class name for a static inner class representing an inline object property.
+     * Uses schema title if present and valid, otherwise capitalizes the property name.
+     */
+    private String getInnerClassNameForInlineProperty(String propertyName, Map<String, Object> fieldSchema) {
+        if (fieldSchema != null && fieldSchema.containsKey("title")) {
+            String title = (String) fieldSchema.get("title");
+            if (title != null && !title.isEmpty()) {
+                return toJavaClassName(title);
+            }
+        }
+        if (propertyName != null && !propertyName.isEmpty()) {
+            return toJavaClassName(capitalize(propertyName));
+        }
+        return "Inline";
+    }
+
+    /**
      * Generate a name for an in-lined schema
      */
     private String generateInlinedSchemaName(String operationId, Map<String, Object> schema, int counter) {
@@ -2362,13 +2402,18 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
         // Wrappers to generate as static inner classes (object-with-single-array properties)
         List<WrapperToGenerate> wrappersToGenerate = new ArrayList<>();
+        // Inline object properties to generate as static inner classes (propertyName -> fieldSchema)
+        List<Map.Entry<String, Map<String, Object>>> innerClassesToGenerate = new ArrayList<>();
 
         // Collect referenced model types for imports (use wrapper class name for parent field; add item type for inner class)
         Set<String> modelImports = new LinkedHashSet<>();
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
             String fieldName = property.getKey();
             Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
-            String fieldType = getFieldTypeForModelProperty(fieldName, fieldSchema, isArrayType, spec);
+            if (isInlineObjectProperty(fieldSchema, spec)) {
+                innerClassesToGenerate.add(new AbstractMap.SimpleEntry<>(fieldName, fieldSchema));
+            }
+            String fieldType = getFieldTypeForModelProperty(schemaName, fieldName, fieldSchema, isArrayType, spec);
             if (isObjectWithSingleArrayOfRef(fieldSchema, spec)) {
                 ObjectWithSingleArrayInfo info = getObjectWithSingleArrayInfo(fieldSchema, spec);
                 if (info != null) {
@@ -2434,7 +2479,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
             // Add JAXB @XmlElement annotation
             String javaFieldName = toModelFieldName(fieldName);
-            String fieldType = getFieldTypeForModelProperty(fieldName, fieldSchema, isArrayType, spec);
+            String fieldType = getFieldTypeForModelProperty(schemaName, fieldName, fieldSchema, isArrayType, spec);
             boolean isWrapperType = isObjectWithSingleArrayOfRef(fieldSchema, spec);
 
             // Wrapper type: single @XmlElement(name=fieldName). Direct list: @XmlElementWrapper + @XmlElement(). Else: @XmlElement(name=fieldName).
@@ -2694,7 +2739,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                     }
                     fieldType = "List<" + itemType + ">";
                 } else {
-                    fieldType = getFieldTypeForModelProperty(fieldName, fieldSchema, isArrayType, spec);
+                    fieldType = getFieldTypeForModelProperty(schemaName, fieldName, fieldSchema, isArrayType, spec);
                 }
                 // readOnly properties have no setter; setAttribute must not call setXxx for them
                 boolean readOnly = isSchemaFlagTrue(fieldSchema, "readOnly");
@@ -2721,6 +2766,11 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
         content.append("    }\n");
 
+        // Generate static inner classes for inline object properties
+        for (Map.Entry<String, Map<String, Object>> entry : innerClassesToGenerate) {
+            appendInnerClassForInlineObject(content, schemaName, entry.getKey(), entry.getValue(), spec);
+        }
+
         // Generate static inner wrapper classes (object-with-single-array)
         for (WrapperToGenerate w : wrappersToGenerate) {
             appendWrapperInnerClass(content, w, schemaName);
@@ -2729,6 +2779,182 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("}\n");
 
         writeFile(outputDir + (isModelsOnly?"/":"/src/main/java/") + packagePath.replace(".", "/") + (isModelsOnly?"/"+sanitizePackageName(schemaName)+"/":"/model/") + schemaName + ".java", content.toString());
+    }
+
+    /**
+     * Append a static inner class for an inline object property. Recursively appends nested inner classes for nested inline objects.
+     * @param enclosingClassName parent schema name (e.g. "KnowledgeExport") or full path for nested (e.g. "KnowledgeExport.DataDestination")
+     */
+    private void appendInnerClassForInlineObject(StringBuilder content, String enclosingClassName, String propertyName, Map<String, Object> innerSchema, Map<String, Object> spec) {
+        Map<String, Object> allProperties = new LinkedHashMap<>();
+        List<String> allRequired = new ArrayList<>();
+        if (innerSchema.containsKey("allOf")) {
+            List<Map<String, Object>> allOfSchemas = Util.asStringObjectMapList(innerSchema.get("allOf"));
+            if (allOfSchemas != null) {
+                for (Map<String, Object> subSchema : allOfSchemas) {
+                    if (subSchema != null) mergeSchemaProperties(subSchema, allProperties, allRequired, spec);
+                }
+            }
+        } else if (innerSchema.containsKey("oneOf") || innerSchema.containsKey("anyOf")) {
+            List<Map<String, Object>> schemasList = Util.asStringObjectMapList(
+                    innerSchema.containsKey("oneOf") ? innerSchema.get("oneOf") : innerSchema.get("anyOf"));
+            if (schemasList != null) {
+                for (Map<String, Object> subSchema : schemasList) {
+                    if (subSchema != null) mergeSchemaProperties(subSchema, allProperties, allRequired, spec);
+                }
+            }
+        } else {
+            mergeSchemaProperties(innerSchema, allProperties, allRequired, spec);
+        }
+        List<String> fieldNames = new ArrayList<>(allProperties.keySet());
+        String innerClassName = getInnerClassNameForInlineProperty(propertyName, innerSchema);
+        String fullEnclosing = enclosingClassName + "." + innerClassName;
+
+        String indentClass = enclosingClassName.contains(".") ? "        " : "    ";
+        String indentBody = indentClass + "    ";
+
+        List<Map.Entry<String, Map<String, Object>>> nestedInners = new ArrayList<>();
+        for (Map.Entry<String, Object> prop : allProperties.entrySet()) {
+            Map<String, Object> propSchema = Util.asStringObjectMap(prop.getValue());
+            if (isInlineObjectProperty(propSchema, spec)) {
+                nestedInners.add(new AbstractMap.SimpleEntry<>(prop.getKey(), propSchema));
+            }
+        }
+
+        content.append("\n").append(indentClass).append("@XmlAccessorType(XmlAccessType.FIELD)\n");
+        content.append(indentClass).append("@XmlType(name = \"\", propOrder = {\n");
+        for (int i = 0; i < fieldNames.size(); i++) {
+            content.append(indentBody).append("\"").append(toPropOrderName(toModelFieldName(fieldNames.get(i)))).append("\"");
+            content.append(i < fieldNames.size() - 1 ? ",\n" : "\n");
+        }
+        content.append(indentClass).append("})\n");
+        content.append(indentClass).append("public static class ").append(innerClassName).append(" implements Serializable, JAXBBean {\n\n");
+        content.append(indentBody).append("private static final long serialVersionUID = 1L;\n\n");
+
+        for (Map.Entry<String, Object> property : allProperties.entrySet()) {
+            String fieldName = property.getKey();
+            Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
+            String fieldType = getFieldTypeForModelProperty(fullEnclosing, fieldName, fieldSchema, false, spec);
+            String javaFieldName = toModelFieldName(fieldName);
+            content.append(indentBody);
+            content.append("@XmlElement(name = \"").append(fieldName).append("\"");
+            if (allRequired.contains(fieldName)) content.append(", required = true");
+            content.append(")\n").append(indentBody);
+            String validationAnnotations = generateValidationAnnotations(fieldSchema, allRequired.contains(fieldName));
+            if (!validationAnnotations.isEmpty()) {
+                content.append(validationAnnotations.replace("\n    ", "\n" + indentBody));
+            }
+            content.append("private ").append(fieldType).append(" ").append(javaFieldName).append(";\n\n");
+        }
+
+        content.append(indentBody).append("public ").append(innerClassName).append("() {\n");
+        content.append(indentBody).append("}\n\n");
+
+        for (Map.Entry<String, Object> property : allProperties.entrySet()) {
+            String fieldName = property.getKey();
+            Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
+            String fieldType = getFieldTypeForModelProperty(fullEnclosing, fieldName, fieldSchema, false, spec);
+            String javaFieldName = toModelFieldName(fieldName);
+            String capitalizedFieldName = getCapitalizedPropertyNameForAccessor(javaFieldName);
+            boolean readOnly = isSchemaFlagTrue(fieldSchema, "readOnly");
+            boolean writeOnly = isSchemaFlagTrue(fieldSchema, "writeOnly");
+            if (readOnly && writeOnly) writeOnly = false;
+            if (!writeOnly) {
+                content.append(indentBody).append("public ").append(fieldType).append(" get").append(capitalizedFieldName).append("() {\n");
+                content.append(indentBody).append("    return ").append(javaFieldName).append(";\n");
+                content.append(indentBody).append("}\n\n");
+            }
+            if (!readOnly) {
+                content.append(indentBody).append("public void set").append(capitalizedFieldName).append("(").append(fieldType).append(" ").append(javaFieldName).append(") {\n");
+                content.append(indentBody).append("    this.").append(javaFieldName).append(" = ").append(javaFieldName).append(";\n");
+                content.append(indentBody).append("}\n\n");
+            }
+        }
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public boolean equals(Object o) {\n");
+        content.append(indentBody).append("    if (this == o) return true;\n");
+        content.append(indentBody).append("    if (o == null || getClass() != o.getClass()) return false;\n");
+        content.append(indentBody).append("    ").append(innerClassName).append(" that = (").append(innerClassName).append(") o;\n");
+        content.append(indentBody).append("    return ");
+        for (int i = 0; i < fieldNames.size(); i++) {
+            if (i > 0) content.append(indentBody).append("    ");
+            String mf = toModelFieldName(fieldNames.get(i));
+            content.append("Objects.equals(").append(mf).append(", that.").append(mf).append(")");
+            content.append(i < fieldNames.size() - 1 ? " &&\n" : ";\n");
+        }
+        if (fieldNames.isEmpty()) content.append("true;\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public int hashCode() {\n");
+        content.append(indentBody).append("    return Objects.hash(");
+        for (int i = 0; i < fieldNames.size(); i++) {
+            if (i > 0) content.append(", ");
+            content.append(toModelFieldName(fieldNames.get(i)));
+        }
+        content.append(");\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public String toString() {\n");
+        content.append(indentBody).append("    return \"").append(innerClassName).append("{\" +\n");
+        for (int i = 0; i < fieldNames.size(); i++) {
+            String jf = toModelFieldName(fieldNames.get(i));
+            content.append(indentBody).append("            \"").append(jf).append("=\" + ").append(jf);
+            content.append(i < fieldNames.size() - 1 ? " + \", \" +\n" : " +\n");
+        }
+        content.append(indentBody).append("            '}';\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public Object getAttribute(String name) {\n");
+        for (String fn : fieldNames) {
+            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
+            if (isSchemaFlagTrue(fs, "writeOnly")) continue;
+            content.append(indentBody).append("    if (\"").append(fn).append("\".equals(name)) return ").append(toModelFieldName(fn)).append(";\n");
+        }
+        content.append(indentBody).append("    return null;\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public boolean isSetAttribute(String name) {\n");
+        for (String fn : fieldNames) {
+            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
+            if (isSchemaFlagTrue(fs, "readOnly")) continue;
+            content.append(indentBody).append("    if (\"").append(fn).append("\".equals(name)) return ").append(toModelFieldName(fn)).append(" != null;\n");
+        }
+        content.append(indentBody).append("    return false;\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public List<String> getAttributeNames() {\n");
+        content.append(indentBody).append("    List<String> names = new ArrayList<>();\n");
+        for (String fn : fieldNames) {
+            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
+            if (isSchemaFlagTrue(fs, "writeOnly")) continue;
+            content.append(indentBody).append("    names.add(\"").append(fn).append("\");\n");
+        }
+        content.append(indentBody).append("    return names;\n");
+        content.append(indentBody).append("}\n\n");
+
+        content.append(indentBody).append("@Override\n");
+        content.append(indentBody).append("public void setAttribute(String name, Object value) {\n");
+        for (String fn : fieldNames) {
+            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
+            if (isSchemaFlagTrue(fs, "readOnly")) continue;
+            String jf = toModelFieldName(fn);
+            String cap = getCapitalizedPropertyNameForAccessor(jf);
+            String ft = getFieldTypeForModelProperty(fullEnclosing, fn, Util.asStringObjectMap(allProperties.get(fn)), false, spec);
+            content.append(indentBody).append("    if (\"").append(fn).append("\".equals(name)) { set").append(cap).append("((").append(ft).append(") value); return; }\n");
+        }
+        content.append(indentBody).append("}\n");
+
+        for (Map.Entry<String, Map<String, Object>> entry : nestedInners) {
+            appendInnerClassForInlineObject(content, fullEnclosing, entry.getKey(), entry.getValue(), spec);
+        }
+
+        content.append(indentClass).append("}\n");
     }
 
     /**
@@ -3188,9 +3414,13 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
     }
 
     /**
-     * Field type for a property when generating the parent model: wrapper class name if object-with-single-array, else computeFieldTypeForProperty.
+     * Field type for a property when generating the parent model: inner class if inline object, wrapper class if object-with-single-array, else computeFieldTypeForProperty.
+     * @param parentSchemaName current model or enclosing class name (e.g. "KnowledgeExport" or "KnowledgeExport.DataDestination")
      */
-    private String getFieldTypeForModelProperty(String fieldName, Map<String, Object> fieldSchema, boolean isArrayType, Map<String, Object> spec) {
+    private String getFieldTypeForModelProperty(String parentSchemaName, String fieldName, Map<String, Object> fieldSchema, boolean isArrayType, Map<String, Object> spec) {
+        if (isInlineObjectProperty(fieldSchema, spec)) {
+            return parentSchemaName + "." + getInnerClassNameForInlineProperty(fieldName, fieldSchema);
+        }
         if (isObjectWithSingleArrayOfRef(fieldSchema, spec)) {
             return getWrapperClassName(fieldName);
         }
@@ -3219,10 +3449,14 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
 
     /**
      * Add referenced model type names from a field type string to the given set.
-     * Skips excluded types and the current schema name.
+     * Skips excluded types, the current schema name, and inner classes (currentSchemaName.*).
      */
     private void addModelImportTypes(String fieldType, String currentSchemaName, Set<String> modelImports) {
         if (fieldType == null || fieldType.isEmpty()) return;
+        // Inner class of current model - same file, no import
+        if (currentSchemaName != null && fieldType.startsWith(currentSchemaName + ".")) {
+            return;
+        }
         if (fieldType.startsWith("List<")) {
             int start = fieldType.indexOf('<') + 1;
             int end = fieldType.lastIndexOf('>');
