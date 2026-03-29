@@ -215,18 +215,45 @@ oas-sdk-java/
 **Maven:**
 ```xml
 <dependency>
-    <groupId>egain.oas-sdk</groupId>
-    <artifactId>egain-oas-sdk-java</artifactId>
-    <version>1.0.0</version>
+    <groupId>com.egain</groupId>
+    <artifactId>oas-sdk-java</artifactId>
+    <version>2.0</version>
 </dependency>
 ```
 
 **Gradle:**
 ```gradle
-implementation 'egain.oas-sdk:egain-oas-sdk-java:1.0.0'
+implementation 'com.egain:oas-sdk-java:2.0'
 ```
 
-### 2. Basic Usage
+### 2. CLI Usage
+
+The SDK includes a command-line interface for quick code generation without writing Java code:
+
+```bash
+# Build the CLI
+mvn clean package -DskipTests
+
+# Generate a Jersey application from an OpenAPI spec
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar generate openapi.yaml -l java -f jersey -p com.example.api -o ./generated
+
+# Generate test suites
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar tests openapi.yaml -t unit,integration -o ./generated/tests
+
+# Generate mock data
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar mockdata openapi.yaml -o ./generated/mock-data
+
+# Generate everything (application, tests, mock data, docs)
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar all openapi.yaml -l java -f jersey -o ./generated
+
+# Validate a specification
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar validate openapi.yaml
+
+# Show API information
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar info openapi.yaml
+```
+
+### 3. Programmatic Usage
 
 ```java
 import egain.oassdk.OASSDK;
@@ -288,7 +315,7 @@ public class Example {
 }
 ```
 
-### 2a. Cross-platform: Loading specs from a ZIP
+### 3a. Cross-platform: Loading specs from a ZIP
 
 To avoid file and path separator differences between Windows and Mac, you can load specs from a ZIP file. Set `specZipPath` in `GeneratorConfig` to the path of the ZIP file; then call `loadSpec()` with the **entry path inside the ZIP** (use forward slashes, e.g. `published/core/infomgr/v4/api.yaml`). All YAML and `$ref` resolution are read from the ZIP.
 
@@ -313,7 +340,7 @@ try {
 
 When using `specZipPath`, call `close()` when done (or use try-with-resources as above) to release the ZIP filesystem.
 
-### 3. Security and @Actor Annotations
+### 4. Security and @Actor Annotations
 
 The SDK automatically generates `@Actor` annotations for Jersey resources based on OpenAPI security specifications. The annotations include `ActorType` and `OAuthScope` enums extracted from security schemes.
 
@@ -347,7 +374,7 @@ public class PromptsResource {
 
 Scopes are automatically converted to enum format (e.g., `knowledge.contentmgr.read` → `KNOWLEDGE_CONTENTMGR_READ`).
 
-### 4. Filtering APIs and Operations
+### 5. Filtering APIs and Operations
 
 The SDK allows you to filter which APIs and operations to generate code for, rather than generating for all APIs in the OpenAPI specification. This is useful when working with large specifications where you only need specific endpoints.
 
@@ -2103,201 +2130,35 @@ For support and questions:
 - [ ] OpenTelemetry Logs integration (structured JSON logging)
 - [ ] APM vendor integrations (Datadog, New Relic)
 
-## 🙏 Acknowledgments
-
-- **Jersey**: JAX-RS implementation for RESTful web services
-- **Jakarta EE**: Enterprise Java standards
-- **Grizzly**: High-performance HTTP server
-- **OpenTelemetry**: Distributed tracing and observability
-- **Micrometer**: Application metrics facade
-- **Prometheus**: Metrics collection and monitoring
-- **Grafana**: Metrics visualization and dashboards
-- **Jackson**: JSON processing
-- **JavaFaker**: Realistic test data generation
-- **Redocly**: Professional documentation tooling
-- **Swagger UI**: Interactive API documentation
-- **Flexmark**: Advanced Markdown processing
-- **FreeMarker**: Template engine
-- **Maven**: Build management
-
 ## 📊 Version History
 
-### 1.33-SNAPSHOT (Current)
+See [CHANGELOG.md](CHANGELOG.md) for a detailed version history.
 
-- ✅ **Built-in Observability Framework** (OpenTelemetry + Micrometer)
-  - Generated applications include distributed tracing (OpenTelemetry) and metrics (Micrometer) out of the box
-  - Java/Jersey: MetricsFilter, TracingFilter, MetricsEndpoint, ObservabilityBootstrap as JAX-RS providers
-  - Python/FastAPI: FastAPIInstrumentor + prometheus-fastapi-instrumentator middleware
-  - Python/Flask: FlaskInstrumentor + prometheus-flask-exporter middleware
-  - Node.js/Express: @opentelemetry/sdk-node auto-instrumentation + express-prom-bundle
-  - `ObservabilityConfig` with builder pattern for fine-grained control (metrics, tracing, logging, exporters)
-  - Prometheus `/metrics` endpoint generated for all languages
-  - Configurable via `GeneratorConfig.builder().observabilityEnabled(true/false)`
-- ✅ **JerseyGenerator Decomposition** (7,318 LOC -> 13 focused classes, largest 1,292 LOC)
-  - `JerseyGenerator.java` reduced from 7,318 to ~380 lines (95% reduction)
-  - Extracted: JerseyModelGenerator, JerseyResourceGenerator, JerseyExecutorGenerator, JerseyBuildGenerator
-  - Extracted: JerseyValidationGenerator (17 validator classes), JerseyQueryParamValidatorGenerator
-  - Extracted: JerseyObservabilityGenerator, JerseySchemaCollector, JerseySchemaUtils, JerseyTypeUtils, JerseyNamingUtils
-  - Shared state managed via JerseyGenerationContext
-  - 121 new unit tests for decomposed utilities (758 total, up from 637)
-  - All existing tests pass unchanged (backward-compatible refactoring)
-- ✅ **Enhanced Mock Data Generation**
-  - `$ref` schemas properly resolved in `allOf` compositions (previously skipped)
-  - `oneOf` picks random variant, `anyOf` merges random subset
-  - Array types return proper JSON arrays (fixed `{"items": [...]}` wrapping bug)
-  - Recursion depth limit prevents stack overflow on circular schemas
-  - Configurable instance count via `TestConfig.additionalProperties["mockInstanceCount"]`
-  - New formats: password, byte (base64), binary, hostname, ipv4, ipv6
-  - Public `generateRequestBodyJson()` method for integration with test generators
-- ✅ **OAS-Driven Randomized Sequential Testing**
-  - Endpoints dynamically extracted from OAS spec paths (previously hardcoded `/api/users`)
-  - Request bodies generated from OAS schemas via MockDataGenerator
-  - Dependency graph inferred from path parameters (`{id}` implies prior POST)
-  - State extraction for all resources (previously hardcoded to `/users/` only)
-  - Jackson ObjectMapper for JSON parsing (replaces fragile indexOf/substring)
-  - PATCH, HEAD, OPTIONS method support added
-  - Automatic cleanup/teardown of created resources in reverse order
-  - Seed-based `Random` for reproducible test sequences
-- ✅ **Enhanced Test Generation**
-  - Integration tests generate schema-derived request bodies (previously empty `"{}"`)
-  - Response schema validation: required fields presence and type checking
-  - Authentication setup generated from OAS `securitySchemes` (Bearer, API key, OAuth2)
-  - Negative test cases: empty body, malformed JSON, boundary values, wrong types, missing required fields
-  - RBAC testing from OAS security scopes (correct scope, insufficient scope, wrong role)
-  - CORS preflight and unauthorized origin tests
-  - Rate limiting verification tests
-- ✅ **SLA Monitoring Improvements**
-  - Real `AtomicLong` metric counters replace hardcoded stubs (150.0ms, 0.01 error rate, etc.)
-  - Per-endpoint tracking via `ConcurrentHashMap`
-  - Correlation ID propagation via `CorrelationIdFilter` (X-Trace-Id header)
-  - Atomic sliding-window rate limiter with CAS loop (fixes TOCTOU race condition)
-  - SLA thresholds derived from OAS `x-sla-*` extensions
-  - Standard Micrometer metric names in Grafana dashboard (`http_server_requests_seconds_*`)
-  - 7-panel Grafana dashboard: p50/p75/p95/p99, request rate, per-endpoint rates, error rate, SLA compliance, availability
-  - Fixed Dockerfile: `eclipse-temurin:21-jre` (was `openjdk:11-jre-slim`)
-  - Fixed Prometheus config: `/metrics` path (was `/actuator/prometheus`)
-  - Fixed Docker Compose healthcheck: `/sla/status` (was `/actuator/health`)
-  - Restricted AWS API Gateway policy to actual API paths (was open `*/*/*`)
-- ✅ **Code Quality Improvements**
-  - Removed 4 `catch (StackOverflowError)` blocks, replaced with proper cycle detection via depth limits
-  - Replaced ThreadLocal with plain instance field in JerseyGenerator (documented as non-thread-safe)
-  - Extracted shared `Constants.HTTP_METHODS` array (replaced 14 hardcoded arrays across 11 files)
-  - Deprecated `test/mock/MockDataGenerator`, `test/nfr/NFRTestGenerator`, `test/postman/PostmanTestGenerator` in favor of canonical `testgenerators/` versions
-  - Fixed missing `Base64` import in MockDataGenerator
-  - Fixed undefined `logger` and hardcoded package in generated Application class
-  - Consistent `GenerationException` error handling in SLAProcessor
-  - Defensive copies in SLAConfig constructor
+### Current: 2.1-SNAPSHOT (in development)
 
-### 1.16-SNAPSHOT
-- ✅ **Simplified Test Resources**
-  - **File Simplification**: Reduced test YAML files from ~52,000 lines to ~1,100 lines (98% reduction)
-  - **Consistent Naming**: Renamed test files to follow openapi[N].yaml convention for clarity
-    - `openapi_18Nov.yaml` → `openapi3.yaml`
-    - `openapi_12.yaml` → `openapi4.yaml`
-    - `portalmgrapi.yaml` → `openapi5.yaml`
-  - **Easy to Understand**: Each file now contains 2-4 paths with clear, minimal examples
-  - **Maintained Compliance**: All files remain valid OpenAPI 3.0 specifications
-  - **Updated Test References**: All test classes updated to use new file names
-- ✅ **Standardized Dummy Data**
-  - **Uniform URLs**: All server URLs use example.com domain
-  - **Consistent Emails**: All email addresses use example.com domain (support@example.com, user@example.com)
-  - **Test License**: All files include "Test License is required" in license section
-- ✅ **Multi-Language Test Generation**
-  - **Language-Aware Test Generators**: Tests are now generated in the same language as your application code
-  - **Java Tests**: JUnit 5 for unit and integration tests with JAX-RS Client
-  - **Python Tests**: pytest for unit and integration tests with fixtures, mocks, and requests library
-  - **Node.js Tests**: Jest for unit and integration tests with axios for HTTP calls
-  - **Automatic Language Detection**: TestConfig automatically inherits language/framework from GeneratorConfig
-  - **Explicit Test Configuration**: Override test language/framework via TestConfig.builder()
-  - **Configuration Files**: Language-specific test configurations (pytest.ini, jest.config.js)
-  - **Dependency Management**: Automatic generation of requirements.txt (Python) and package.json (Node.js) for tests
-  - **Test Utilities**: Shared fixtures (conftest.py), setup files (setup.js), and helper functions for each language
-- ✅ **Enhanced Code Quality**
-  - **Character Encoding**: All file operations now explicitly use UTF-8 encoding for platform independence
-  - **Locale-Safe String Operations**: String case conversions use Locale.ROOT to prevent locale-specific bugs (e.g., Turkish 'i')
-  - **SpotBugs Compliance**: Resolved all high-priority SpotBugs warnings for production-ready code
-  - **Type Safety**: Addressed unchecked cast warnings with proper annotations using Util helper methods
-  - **Defensive Copying**: Implemented defensive copying for mutable collections and arrays to prevent internal representation exposure
-  - **Error Handling**: Comprehensive error logging at SEVERE level for all exception cases
-- ✅ **Comprehensive Logging System**
-  - **java.util.logging Integration**: Full logging support using Java's built-in logging framework
-  - **Automatic File Rotation**: Log files automatically rotate when they reach configured size (default: 1MB)
-  - **Configurable Settings**: Log directory, file size, backup count, and log level via properties file, system properties, or environment variables
-  - **Error Level Logging**: All exception cases are logged at ERROR (SEVERE) level with full stack traces
-  - **Configuration File**: `logger.properties` in classpath for easy configuration
-  - **Console and File Logging**: Optional console output with file-based logging
-  - **Custom Log Format**: Readable log format with timestamps, levels, and source information
-- ✅ **Complete Feature Parity Across All Generators**
-  - **Java Jersey/JAX-RS**: 100% complete with all features
-  - **Python FastAPI**: 100% feature parity with Java
-    - Inline schema collection with Pydantic models
-    - API version extraction and router prefixes
-    - Query parameter validation with Pydantic validators
-    - Security decorators with dependency injection
-    - Scope extraction and checking
-  - **Python Flask**: 100% feature parity with Java
-    - Inline schema collection with dataclasses
-    - API version extraction and blueprint prefixes
-    - Query parameter validation with explicit checks
-    - Security decorators with middleware pattern
-    - Scope extraction and checking
-  - **Node.js Express**: 100% feature parity with Java
-    - Inline schema collection
-    - API version extraction and route prefixes
-    - Query parameter validation with express-validator
-    - JWT authentication middleware
-    - Scope-based authorization
-- ✅ **Enhanced Jersey/JAX-RS Resource Generation**
-  - **@Actor Annotation**: Automatic generation of `@Actor` annotations with `ActorType` and `OAuthScope` enums extracted from OpenAPI security tags
-  - **API Version Support**: Automatic extraction and inclusion of API version in `@Path` annotations from server URLs
-  - **Media Type Priority**: XML content type prioritized over JSON in `@Consumes` and `@Produces` annotations
-  - **Clean Resource Classes**: Removed unnecessary `@Inject` annotations and service field injection
-  - **Header Parameter Exclusion**: Header parameters excluded from method signatures (handled by framework)
-- ✅ **Improved Model Generation**
-  - **In-lined Schema Support**: Models now generated for in-lined schemas in response bodies (not just `$ref` schemas)
-  - **Smart Schema Filtering**: Intermediate schemas used only via `allOf`/`oneOf`/`anyOf` are filtered out to reduce unnecessary model generation
-  - **Better Array Type Resolution**: Improved handling of `$ref` references in array items
-  - **Response Model Naming**: Improved naming conventions for response models
-- ✅ **Validation Improvements**
-  - **Correct Validation Package**: Changed from `jakarta.validation.constraints` to `javax.validation.constraints` for compatibility
-  - **Consistent Imports**: All model classes including `ObjectFactory` now have validation imports
-- ✅ **Production-Ready Jersey/JAX-RS Implementation**
-  - Pure Jersey/JAX-RS framework (no legacy dependencies)
-  - JAX-RS annotations (@Path, @GET, @POST, etc.)
-  - Grizzly HTTP server integration
-  - HK2 dependency injection framework
-  - JAX-RS filters and exception mappers
-  - Code quality validated and optimized
-- ✅ Java 21 support
-- ✅ Java Jersey/JAX-RS code generation (fully implemented)
-- ✅ Python FastAPI code generation (fully implemented)
-- ✅ Professional documentation generation (Redocly, Swagger UI, Markdown)
-- ✅ Template-based documentation
-- ✅ Enhanced OpenAPI specification generation
-- ✅ Proper Maven build structure
-- ✅ Comprehensive test generation
-- ✅ API path and operation filtering for selective code generation
-- ✅ Comprehensive logging system with file rotation and configuration
-- ✅ Error level logging for all exception cases
+Key highlights since v2.0:
+- Comprehensive logging system with file rotation
+- Configurable logging via properties file, system properties, or environment variables
+- Reorganized generated code structure to use `generated-code/` top-level folder
+- Improved reference resolution and encoding fixes
 
-### 1.6.0
-- ✅ **Production-Ready Jersey/JAX-RS Implementation**
-  - Pure Jersey/JAX-RS framework (no legacy dependencies)
-  - JAX-RS annotations (@Path, @GET, @POST, etc.)
-  - Jakarta EE dependency injection (@Inject, @Singleton)
-  - Grizzly HTTP server integration
-  - HK2 dependency injection framework
-  - JAX-RS filters and exception mappers
-  - Code quality validated and optimized
-- ✅ Java 21 support
-- ✅ Java Jersey/JAX-RS code generation (fully implemented)
-- ✅ Python FastAPI code generation (fully implemented)
-- ✅ Professional documentation generation (Redocly, Swagger UI, Markdown)
-- ✅ Template-based documentation
-- ✅ Enhanced OpenAPI specification generation
-- ✅ Proper Maven build structure
-- ✅ Comprehensive test generation
-- ✅ API path and operation filtering for selective code generation
+### v2.0 (Latest Release)
+
+- Built-in Observability Framework (OpenTelemetry + Micrometer) for all languages
+- JerseyGenerator decomposition (7,318 LOC -> 13 focused classes)
+- Enhanced mock data generation with `$ref` resolution in compositions
+- OAS-driven randomized sequential testing
+- Enhanced test generation with schema-derived request bodies and negative test cases
+- SLA monitoring with atomic sliding-window rate limiter and Grafana dashboard
+- Multi-language test generation (Java/JUnit5, Python/pytest, Node.js/Jest)
+- Complete feature parity across Java, Python, and Node.js generators
+- Comprehensive code quality improvements (SpotBugs, encoding, locale-safety)
+
+### 1.0.0 (Initial Release)
+
+- Basic code generation capabilities
+- OpenAPI specification parsing
+- Core SDK functionality
 
 ---
 

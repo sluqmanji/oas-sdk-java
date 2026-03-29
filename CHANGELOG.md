@@ -28,6 +28,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed System.err.println calls by replacing with proper logging
 - Migrated File API to java.nio.file.Files for better robustness
 
+## [2.0] - 2025-12-26
+
+### Added
+- Built-in Observability Framework (OpenTelemetry + Micrometer) for all generated languages
+- JerseyGenerator decomposition (7,318 LOC -> 13 focused classes)
+- Enhanced mock data generation with `$ref` resolution in allOf/oneOf/anyOf compositions
+- OAS-driven randomized sequential testing with dependency graph inference
+- Multi-language test generation (Java/JUnit5, Python/pytest, Node.js/Jest)
+- Complete feature parity across Java, Python, and Node.js generators
+- SLA monitoring with atomic sliding-window rate limiter and 7-panel Grafana dashboard
+- Negative test case generation (empty body, malformed JSON, boundary values)
+- RBAC, CORS, and rate limiting test generation
+- Correlation ID propagation via CorrelationIdFilter
+
+### Changed
+- Simplified test resources (reduced from ~52,000 to ~1,100 lines)
+- All file operations now use UTF-8 encoding explicitly
+- String case conversions use Locale.ROOT for locale safety
+- Resolved all high-priority SpotBugs warnings
+
+### Fixed
+- Encoding issues with StandardCharsets.UTF_8
+- Defensive copying for mutable collections
+- StackOverflowError blocks replaced with proper cycle detection
+- Missing Base64 import in MockDataGenerator
+- Dockerfile updated to eclipse-temurin:21-jre
+
 ## [1.17.0] - 2025-12-26
 
 ### Added
@@ -64,7 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/egain/oas-sdk-java/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/egain/oas-sdk-java/compare/v2.0...HEAD
+[2.0]: https://github.com/egain/oas-sdk-java/compare/v1.17.0...v2.0
 [1.17.0]: https://github.com/egain/oas-sdk-java/releases/tag/v1.17.0
 [1.0.0]: https://github.com/egain/oas-sdk-java/releases/tag/v1.0.0
 

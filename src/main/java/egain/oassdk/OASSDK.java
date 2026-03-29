@@ -23,7 +23,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Main SDK class for OpenAPI-first development
@@ -94,7 +101,7 @@ public class OASSDK implements AutoCloseable {
                 }
                 zipFs = FileSystems.newFileSystem(zipPath, (ClassLoader) null);
             } catch (IOException e) {
-                throw new RuntimeException("Failed to open spec ZIP: " + generatorConfig.getSpecZipPath(), e);
+                throw new IllegalStateException("Failed to open spec ZIP: " + generatorConfig.getSpecZipPath(), e);
             }
         }
         this.zipFileSystem = zipFs;
@@ -687,20 +694,12 @@ public class OASSDK implements AutoCloseable {
      *
      * @param testDir Directory containing generated tests
      * @return true if all tests pass, false otherwise
-     * @throws OASSDKException if test execution fails
+     * @throws UnsupportedOperationException always, as test execution is not yet implemented
      */
-    public boolean runTests(String testDir) throws OASSDKException {
+    public boolean runTests(String testDir) {
         Objects.requireNonNull(testDir, "Test directory cannot be null");
-        try {
-            // This would integrate with the appropriate test runner
-            // based on the language and framework
-            // For now, return true as a placeholder
-            return true;
-
-        } catch (RuntimeException e) {
-            logger.log(java.util.logging.Level.SEVERE, "Failed to run tests: " + e.getMessage(), e);
-            throw new GenerationException("Failed to run tests: " + e.getMessage(), e);
-        }
+        throw new UnsupportedOperationException(
+                "Test execution is not yet implemented. Use the generated test files with your build tool (mvn test, pytest, npm test) instead.");
     }
 
     /**

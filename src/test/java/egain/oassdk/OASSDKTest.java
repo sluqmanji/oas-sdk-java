@@ -353,10 +353,11 @@ public class OASSDKTest {
     }
     
     @Test
-    public void testRunTests() throws OASSDKException {
-        // This is a placeholder method, so it should return true
-        boolean result = sdk.runTests("./tests");
-        assertTrue(result);
+    public void testRunTests() {
+        // runTests is not yet implemented and should throw UnsupportedOperationException
+        assertThrows(UnsupportedOperationException.class, () -> {
+            sdk.runTests("./tests");
+        });
     }
     
     @Test

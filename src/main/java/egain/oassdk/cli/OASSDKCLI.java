@@ -18,7 +18,7 @@ import java.util.logging.Logger;
 /**
  * Command-line interface for OAS SDK
  */
-@Command(name = "oas-sdk", mixinStandardHelpOptions = true, version = "1.0.0",
+@Command(name = "oas-sdk", mixinStandardHelpOptions = true, version = "2.1-SNAPSHOT",
         description = "OpenAPI Specification SDK (OAS-SDK) for Java")
 public class OASSDKCLI implements Callable<Integer> {
 
@@ -51,9 +51,6 @@ public class OASSDKCLI implements Callable<Integer> {
                 description = "Output directory")
         private String output;
 
-        @Option(names = {"-c", "--config"}, description = "Configuration file")
-        private String config;
-
         @Option(names = {"-s", "--search-path"}, split = ",",
                 description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
         private List<String> searchPaths;
@@ -64,7 +61,7 @@ public class OASSDKCLI implements Callable<Integer> {
         @Override
         public Integer call() {
             try {
-                // Build configuration from CLI params (config file loading not yet implemented)
+                // Build configuration from CLI params
                 GeneratorConfig.Builder configBuilder = GeneratorConfig.builder()
                         .language(language)
                         .framework(framework)
@@ -233,29 +230,18 @@ public class OASSDKCLI implements Callable<Integer> {
                 description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
         private List<String> searchPaths;
 
-        @Option(names = {"-c", "--config"}, description = "Configuration file")
-        private String config;
-
         @Override
         public Integer call() {
             try {
-                GeneratorConfig generatorConfig;
+                GeneratorConfig generatorConfig = GeneratorConfig.builder()
+                        .language(language)
+                        .framework(framework)
+                        .packageName(packageName)
+                        .outputDir(output)
+                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
+                        .build();
                 TestConfig testConfig = TestConfig.builder().build();
                 SLAConfig slaConfig = null;
-
-                if (config != null) {
-                    // Configuration loading from file is not yet implemented
-                    generatorConfig = GeneratorConfig.builder().build();
-                    slaConfig = SLAConfig.builder().build();
-                } else {
-                    generatorConfig = GeneratorConfig.builder()
-                            .language(language)
-                            .framework(framework)
-                            .packageName(packageName)
-                            .outputDir(output)
-                            .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
-                            .build();
-                }
 
                 OASSDK sdk = new OASSDK(generatorConfig, testConfig, slaConfig);
 

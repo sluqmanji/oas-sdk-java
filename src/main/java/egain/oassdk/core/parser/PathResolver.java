@@ -138,6 +138,16 @@ public class PathResolver {
             throw new OASSDKException("File path cannot be null or empty");
         }
 
+        try {
+        return resolveReferenceInternal(filePath, baseDir);
+        } finally {
+            // Ensure thread-local recursion depth is cleaned up after each top-level call
+            // to prevent memory leaks in thread-pool scenarios
+            cleanup();
+        }
+    }
+
+    private Path resolveReferenceInternal(String filePath, Path baseDir) throws OASSDKException {
         // Sanitize file path first (normalize backslashes, etc.)
         String sanitizedPath = sanitizePath(filePath);
 
@@ -487,8 +497,10 @@ public class PathResolver {
     }
 
     /**
-     * Clean up thread-local resources
-     * Should be called when done with the PathResolver instance to prevent memory leaks
+     * Clean up thread-local resources.
+     * Called automatically after each {@link #resolveReference} call.
+     * Can also be called explicitly when done with the PathResolver instance
+     * to prevent memory leaks in thread-pool scenarios.
      */
     public void cleanup() {
         this.currentRecursionDepth.remove();
