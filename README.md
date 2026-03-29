@@ -6,15 +6,21 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-A comprehensive Java SDK for generating applications, tests, mock data for tests, SLA enforcement, and professional documentation from OpenAPI specifications. Built with modern libraries and best practices for enterprise-grade API development.
+A comprehensive Java SDK for generating production-ready applications with built-in observability (OpenTelemetry + Micrometer), comprehensive test suites, realistic mock data, SLA enforcement, and professional documentation from OpenAPI specifications. Supports Java/Jersey, Python/FastAPI/Flask, and Node.js/Express. Built with modern libraries and best practices for enterprise-grade API development.
 
 ## 📖 Table of Contents
 
 - [Features](#-features)
 - [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
+- [Project Structure](#-project-structure)
 - [Quick Start](#-quick-start)
-- [Documentation](#-documentation)
+- [Configuration](#-configuration)
+- [Observability](#-built-in-observability)
+- [Documentation](#-documentation-generation)
+- [Generated Artifacts](#-generated-artifacts)
+- [Dependencies](#-dependencies)
+- [Testing](#-testing)
+- [Roadmap](#-roadmap)
 - [Contributing](#-contributing)
 - [License](#-license)
 - [Support](#-support)
@@ -72,20 +78,30 @@ All generated Java applications use industry-standard **JAX-RS annotations** (@P
   - **Cross-Language**:
     - NFR Tests (Non-functional requirements)
     - Performance Tests (JMeter, Gatling)
-    - Security Tests (OWASP ZAP)
+    - Security Tests (OWASP ZAP, RBAC, CORS, rate limiting)
     - Postman Collections with automated scripts
-    - Randomized Sequence Testing
+    - Randomized Sequence Testing (OAS-driven, with dependency inference and cleanup)
 
 - **📊 Mock Data**: Realistic mock data generation based on OpenAPI schemas
-  - JSON examples
-  - Test data factories
-  - cURL commands
+  - JSON examples with JavaFaker-based smart field generation
+  - Full `$ref` resolution in `allOf`/`oneOf`/`anyOf` compositions
+  - Configurable instance count and format support (email, uuid, ipv4, ipv6, byte, etc.)
+  - Test data factories and cURL commands
+  - Integrated as request body fixtures in generated tests
+
+- **🔭 Built-in Observability**: OpenTelemetry + Micrometer instrumentation generated into every application
+  - **Distributed Tracing**: OpenTelemetry spans with W3C Trace Context propagation
+  - **Metrics**: Micrometer counters and timers (http.server.requests) with Prometheus export
+  - **Prometheus Endpoint**: `/metrics` endpoint auto-generated for scraping
+  - **Multi-language**: Java (JAX-RS filters), Python (FastAPI/Flask instrumentors), Node.js (express-prom-bundle)
+  - **Configurable**: Enable/disable metrics, tracing, logging independently via `ObservabilityConfig`
 
 - **🛡️ SLA Enforcement**: API Gateway scripts and SLA enforcement
-  - Rate limiting
-  - Response time monitoring
-  - Error rate tracking
-  - Prometheus and Grafana integration
+  - Rate limiting with atomic sliding-window algorithm
+  - Real-time response time, error rate, and availability tracking
+  - Correlation ID propagation via `X-Trace-Id` headers
+  - SLA thresholds derived from OAS `x-sla-*` extensions
+  - Prometheus and Grafana integration (7-panel dashboard with p50/p75/p95/p99 percentiles)
 
 - **📚 Professional Documentation**: Modern documentation generation using industry-standard tools
   - **Redocly**: Interactive documentation with CLI integration
@@ -155,7 +171,20 @@ oas-sdk-java/
 │   │   │       │   ├── OpenAPISpecGenerator.java
 │   │   │       │   └── TemplateGenerator.java
 │   │   │       ├── generators/              # Code generators
-│   │   │       │   ├── java/               # Java/Jersey generator
+│   │   │       │   ├── java/               # Java/Jersey generator (decomposed)
+│   │   │       │   │   ├── JerseyGenerator.java           # Coordinator (~380 LOC)
+│   │   │       │   │   ├── JerseyGenerationContext.java    # Shared state
+│   │   │       │   │   ├── JerseyModelGenerator.java       # Model classes, JAXB
+│   │   │       │   │   ├── JerseyResourceGenerator.java    # REST endpoints
+│   │   │       │   │   ├── JerseyExecutorGenerator.java    # BO executors
+│   │   │       │   │   ├── JerseyBuildGenerator.java       # pom.xml, Application
+│   │   │       │   │   ├── JerseyValidationGenerator.java  # 17 validator classes
+│   │   │       │   │   ├── JerseyQueryParamValidatorGenerator.java
+│   │   │       │   │   ├── JerseyObservabilityGenerator.java # OTEL + Micrometer
+│   │   │       │   │   ├── JerseySchemaCollector.java      # Schema discovery
+│   │   │       │   │   ├── JerseySchemaUtils.java          # Schema resolution
+│   │   │       │   │   ├── JerseyTypeUtils.java            # Java type mapping
+│   │   │       │   │   └── JerseyNamingUtils.java          # Name conversions
 │   │   │       │   ├── python/              # Python generators (FastAPI, Flask)
 │   │   │       │   ├── nodejs/              # Node.js/Express generator
 │   │   │       │   ├── go/                 # Go/Gin generator
@@ -534,7 +563,43 @@ public class ConfiguredExample {
 }
 ```
 
-### 7. Multi-Language Test Generation
+### 7. Built-in Observability
+
+Every generated application includes OpenTelemetry distributed tracing and Micrometer metrics out of the box. This is enabled by default and can be controlled via `ObservabilityConfig`.
+
+**What gets generated per language:**
+
+| Language | Tracing | Metrics | Scrape Endpoint |
+|----------|---------|---------|-----------------|
+| Java/Jersey | TracingFilter (OTEL spans, W3C propagation) | MetricsFilter (Micrometer PrometheusMeterRegistry) | `/metrics` |
+| Python/FastAPI | FastAPIInstrumentor | prometheus-fastapi-instrumentator | `/metrics` |
+| Python/Flask | FlaskInstrumentor | prometheus-flask-exporter | `/metrics` |
+| Node.js/Express | @opentelemetry/sdk-node auto-instrumentation | express-prom-bundle | `/metrics` |
+
+**Java generated files** (in `{package}/observability/`):
+- `MetricsFilter.java` -- records `http.server.requests` Timer per method/path/status
+- `TracingFilter.java` -- creates SERVER spans with `http.method`, `http.url`, `http.status_code` attributes
+- `MetricsEndpoint.java` -- JAX-RS resource at `/metrics` returning Prometheus text format
+- `ObservabilityBootstrap.java` -- initializes OTEL SDK with OTLP exporter and W3C propagation
+
+**Disable observability:**
+```java
+GeneratorConfig config = GeneratorConfig.builder()
+    .observabilityEnabled(false)
+    .build();
+```
+
+**Custom configuration:**
+```java
+ObservabilityConfig obsConfig = ObservabilityConfig.builder()
+    .enableMetrics(true)
+    .enableTracing(false)    // Metrics only, no tracing
+    .metricsExporter("prometheus")
+    .serviceName("my-api")
+    .build();
+```
+
+### 8. Multi-Language Test Generation
 
 The SDK automatically generates tests in the same language as your application code. Here are examples for each supported language:
 
@@ -1469,6 +1534,39 @@ GeneratorConfig config = GeneratorConfig.builder()
     .language("java")
     .framework("jersey")
     .packageName("com.example.api")
+    .observabilityEnabled(true)    // Enable OpenTelemetry + Micrometer (default: true)
+    .build();
+```
+
+### Observability Configuration
+
+Control what observability instrumentation is generated into your application:
+
+```java
+import egain.oassdk.config.ObservabilityConfig;
+
+ObservabilityConfig obsConfig = ObservabilityConfig.builder()
+    .enabled(true)                    // Master switch (default: true)
+    .enableMetrics(true)              // Micrometer + Prometheus metrics
+    .enableTracing(true)              // OpenTelemetry distributed tracing
+    .enableLogging(true)              // Structured logging
+    .metricsExporter("prometheus")    // "prometheus" or "otlp"
+    .tracingExporter("otlp")          // "otlp", "jaeger", or "zipkin"
+    .serviceName("my-api")            // Defaults to OAS info.title
+    .otlpEndpoint("http://localhost:4318")
+    .build();
+
+GeneratorConfig config = GeneratorConfig.builder()
+    .language("java")
+    .framework("jersey")
+    .observabilityConfig(obsConfig)
+    .build();
+```
+
+To disable observability entirely:
+```java
+GeneratorConfig config = GeneratorConfig.builder()
+    .observabilityEnabled(false)
     .build();
 ```
 
@@ -1587,6 +1685,11 @@ All class files are generated in the `target/classes/` directory following Maven
 - Exception mappers with @Provider
 - Grizzly HTTP server integration
 - HK2 dependency injection
+- **Observability** (when enabled):
+  - MetricsFilter (Micrometer PrometheusMeterRegistry)
+  - TracingFilter (OpenTelemetry spans with W3C propagation)
+  - MetricsEndpoint (`/metrics` Prometheus scrape endpoint)
+  - ObservabilityBootstrap (OTEL SDK initialization)
 
 **Python FastAPI:**
 - FastAPI application with automatic OpenAPI integration
@@ -1597,8 +1700,8 @@ All class files are generated in the `target/classes/` directory following Maven
 - CORS middleware configuration
 - Service layer structure
 - Configuration management with Pydantic Settings
-- Requirements.txt with dependencies
-- README.md with setup instructions
+- **Observability**: OpenTelemetry FastAPI instrumentation + Prometheus metrics at `/metrics`
+- Requirements.txt with dependencies (including opentelemetry, prometheus-fastapi-instrumentator)
 
 **Python Flask:**
 - Flask application with factory pattern
@@ -1610,8 +1713,8 @@ All class files are generated in the `target/classes/` directory following Maven
 - Service layer structure
 - Environment-based configuration
 - WSGI production configuration with Gunicorn
-- Requirements.txt with dependencies
-- README.md with setup instructions
+- **Observability**: OpenTelemetry Flask instrumentation + Prometheus metrics
+- Requirements.txt with dependencies (including opentelemetry, prometheus-flask-exporter)
 
 **Node.js Express:**
 - Express.js application with route handlers
@@ -1620,8 +1723,8 @@ All class files are generated in the `target/classes/` directory following Maven
 - Model classes with validation
 - CORS and error handling middleware
 - RESTful API structure
-- Package.json with dependencies
-- README.md with setup instructions
+- **Observability**: OpenTelemetry auto-instrumentation + express-prom-bundle metrics
+- Package.json with dependencies (including @opentelemetry/sdk-node, prom-client)
 - API version support in route prefixes
 - Security middleware with scope checking
 
@@ -1671,17 +1774,32 @@ Tests are generated in the same language as your application code for seamless i
 #### Cross-Language Tests
 - **NFR Tests**: Non-functional requirements tests (Java-based)
 - **Performance Tests**: Load and stress tests with JMeter/Gatling (Java-based)
-- **Security Tests**: Security vulnerability tests with OWASP ZAP (Java-based)
+- **Security Tests**: Comprehensive security vulnerability testing (Java-based)
+  - Authentication and authorization (missing/invalid tokens)
+  - RBAC testing from OAS security scopes (correct scope, insufficient scope, wrong role)
+  - SQL injection, XSS, and path traversal vectors
+  - CORS preflight and unauthorized origin testing
+  - Rate limiting verification
 - **Postman Collection**: Complete API testing collection with automated scripts (language-agnostic)
-- **Randomized Sequence Tests**: Property-based testing with random API call sequences (Java-based)
+- **Randomized Sequence Tests**: OAS-driven end-to-end testing (Java-based)
+  - Endpoints extracted dynamically from OAS spec (not hardcoded)
+  - Request bodies generated from OAS schemas
+  - Dependency graph inferred from path parameters
+  - 4 strategies: random, weighted, dependent, stateful
+  - Concurrent execution support
+  - Automatic cleanup/teardown of created resources
+  - Jackson-based JSON parsing with seed-based reproducibility
 
 #### Generated Test Features
 All language-specific tests include:
 - ✅ Success scenarios with valid inputs
+- ✅ Schema-derived request bodies for POST/PUT/PATCH (not empty `"{}"`)
+- ✅ Response schema validation (required fields, type checks)
 - ✅ Missing required parameter validation
+- ✅ Negative test cases (empty body, malformed JSON, boundary values, wrong types)
 - ✅ Unauthorized access testing (if security is enabled)
+- ✅ Authentication setup from OAS `securitySchemes` (Bearer, API key, OAuth2)
 - ✅ Helper functions for URL building and parameter replacement
-- ✅ Authentication token management
 - ✅ Configuration files (`pytest.ini`, `jest.config.js`, etc.)
 - ✅ Dependency management (`requirements.txt`, `package.json`)
 
@@ -1704,6 +1822,13 @@ All language-specific tests include:
 - **Grizzly HTTP Server**: Embedded HTTP server
 - **HK2**: Dependency injection framework
 - **Picocli**: Command-line interface
+- **JavaFaker**: Realistic mock data generation
+
+### Observability Dependencies (generated into applications)
+- **Micrometer** (micrometer-registry-prometheus 1.12.2): Metrics collection with Prometheus export
+- **OpenTelemetry API** (1.34.1): Distributed tracing API
+- **OpenTelemetry SDK** (1.34.1): Tracing SDK with OTLP exporter
+- **OpenTelemetry Semconv**: Semantic conventions for HTTP spans
 
 ### Documentation Dependencies
 - **Flexmark**: Advanced Markdown processing
@@ -1917,11 +2042,55 @@ For support and questions:
   - [x] Error level logging for all exception cases
   - [x] Automatic log file rotation (configurable size, default: 1MB)
   - [x] Console and file logging support
+- [x] Built-in observability framework (OpenTelemetry + Micrometer)
+  - [x] Java/Jersey: MetricsFilter, TracingFilter, MetricsEndpoint, ObservabilityBootstrap
+  - [x] Python/FastAPI: FastAPIInstrumentor + prometheus-fastapi-instrumentator
+  - [x] Python/Flask: FlaskInstrumentor + prometheus-flask-exporter
+  - [x] Node.js/Express: @opentelemetry/sdk-node + express-prom-bundle
+  - [x] ObservabilityConfig with builder pattern (enable/disable metrics, tracing, logging)
+  - [x] Prometheus scrape endpoint at `/metrics` for all languages
+- [x] JerseyGenerator decomposition (7,318 LOC -> 13 focused classes)
+  - [x] JerseyGenerator coordinator (~380 LOC)
+  - [x] JerseyModelGenerator, JerseyResourceGenerator, JerseyExecutorGenerator
+  - [x] JerseyValidationGenerator, JerseyQueryParamValidatorGenerator
+  - [x] JerseyBuildGenerator, JerseyObservabilityGenerator
+  - [x] JerseySchemaCollector, JerseySchemaUtils, JerseyTypeUtils, JerseyNamingUtils
+  - [x] JerseyGenerationContext shared state
+  - [x] 121 new unit tests for decomposed utilities
+- [x] Advanced mock data generation
+  - [x] Full `$ref` resolution in allOf/oneOf/anyOf compositions
+  - [x] Array types return proper JSON arrays (not wrapped in `{"items": [...]}`)
+  - [x] Configurable instance count via TestConfig
+  - [x] Additional format support: password, byte, binary, hostname, ipv4, ipv6
+  - [x] Recursion depth limit for circular schemas
+  - [x] Public `generateRequestBodyJson()` API for integration with test generators
+- [x] OAS-driven randomized sequential testing
+  - [x] Endpoints extracted from spec paths (not hardcoded)
+  - [x] Request bodies generated from OAS schemas
+  - [x] Dependency graph inferred from path parameters
+  - [x] Jackson-based JSON parsing (replaces string manipulation)
+  - [x] PATCH/HEAD/OPTIONS support
+  - [x] Automatic cleanup/teardown sequences
+  - [x] Seed-based reproducibility
+- [x] Enhanced test generation
+  - [x] Schema-derived request bodies in integration tests
+  - [x] Response schema validation (required fields, type checks)
+  - [x] Authentication setup from OAS securitySchemes (Bearer, API key, OAuth2)
+  - [x] Negative test cases (empty body, malformed JSON, boundary values)
+  - [x] RBAC testing from OAS security scopes
+  - [x] CORS and rate limiting security tests
+- [x] SLA monitoring improvements
+  - [x] Real AtomicLong metric counters (replaces hardcoded stubs)
+  - [x] Correlation ID propagation via X-Trace-Id headers
+  - [x] Atomic sliding-window rate limiter (fixes race condition)
+  - [x] SLA thresholds from OAS x-sla-* extensions
+  - [x] Standard Micrometer metric names in Grafana dashboard
+  - [x] 7-panel Grafana dashboard (p50/p75/p95/p99, per-endpoint, SLA compliance, availability)
+  - [x] Fixed Dockerfile (eclipse-temurin:21-jre) and Prometheus config (/metrics path)
 
 ### In Progress 🚧
 - [ ] Go Gin full implementation
 - [ ] C# ASP.NET Core full implementation
-- [ ] Advanced mock data generation
 - [ ] GraphQL API support
 
 ### Planned 📋
@@ -1929,16 +2098,22 @@ For support and questions:
 - [ ] C# ASP.NET Core complete feature parity
 - [ ] API versioning support
 - [ ] CI/CD pipeline generation
-- [ ] Advanced SLA monitoring
 - [ ] WebSocket support
 - [ ] GraphQL schema generation
+- [ ] OpenTelemetry Logs integration (structured JSON logging)
+- [ ] APM vendor integrations (Datadog, New Relic)
 
 ## 🙏 Acknowledgments
 
 - **Jersey**: JAX-RS implementation for RESTful web services
 - **Jakarta EE**: Enterprise Java standards
 - **Grizzly**: High-performance HTTP server
-- **OpenAPI Generator**: Code generation inspiration
+- **OpenTelemetry**: Distributed tracing and observability
+- **Micrometer**: Application metrics facade
+- **Prometheus**: Metrics collection and monitoring
+- **Grafana**: Metrics visualization and dashboards
+- **Jackson**: JSON processing
+- **JavaFaker**: Realistic test data generation
 - **Redocly**: Professional documentation tooling
 - **Swagger UI**: Interactive API documentation
 - **Flexmark**: Advanced Markdown processing
@@ -1947,7 +2122,73 @@ For support and questions:
 
 ## 📊 Version History
 
-### 1.16-SNAPSHOT (Current)
+### 1.33-SNAPSHOT (Current)
+
+- ✅ **Built-in Observability Framework** (OpenTelemetry + Micrometer)
+  - Generated applications include distributed tracing (OpenTelemetry) and metrics (Micrometer) out of the box
+  - Java/Jersey: MetricsFilter, TracingFilter, MetricsEndpoint, ObservabilityBootstrap as JAX-RS providers
+  - Python/FastAPI: FastAPIInstrumentor + prometheus-fastapi-instrumentator middleware
+  - Python/Flask: FlaskInstrumentor + prometheus-flask-exporter middleware
+  - Node.js/Express: @opentelemetry/sdk-node auto-instrumentation + express-prom-bundle
+  - `ObservabilityConfig` with builder pattern for fine-grained control (metrics, tracing, logging, exporters)
+  - Prometheus `/metrics` endpoint generated for all languages
+  - Configurable via `GeneratorConfig.builder().observabilityEnabled(true/false)`
+- ✅ **JerseyGenerator Decomposition** (7,318 LOC -> 13 focused classes, largest 1,292 LOC)
+  - `JerseyGenerator.java` reduced from 7,318 to ~380 lines (95% reduction)
+  - Extracted: JerseyModelGenerator, JerseyResourceGenerator, JerseyExecutorGenerator, JerseyBuildGenerator
+  - Extracted: JerseyValidationGenerator (17 validator classes), JerseyQueryParamValidatorGenerator
+  - Extracted: JerseyObservabilityGenerator, JerseySchemaCollector, JerseySchemaUtils, JerseyTypeUtils, JerseyNamingUtils
+  - Shared state managed via JerseyGenerationContext
+  - 121 new unit tests for decomposed utilities (758 total, up from 637)
+  - All existing tests pass unchanged (backward-compatible refactoring)
+- ✅ **Enhanced Mock Data Generation**
+  - `$ref` schemas properly resolved in `allOf` compositions (previously skipped)
+  - `oneOf` picks random variant, `anyOf` merges random subset
+  - Array types return proper JSON arrays (fixed `{"items": [...]}` wrapping bug)
+  - Recursion depth limit prevents stack overflow on circular schemas
+  - Configurable instance count via `TestConfig.additionalProperties["mockInstanceCount"]`
+  - New formats: password, byte (base64), binary, hostname, ipv4, ipv6
+  - Public `generateRequestBodyJson()` method for integration with test generators
+- ✅ **OAS-Driven Randomized Sequential Testing**
+  - Endpoints dynamically extracted from OAS spec paths (previously hardcoded `/api/users`)
+  - Request bodies generated from OAS schemas via MockDataGenerator
+  - Dependency graph inferred from path parameters (`{id}` implies prior POST)
+  - State extraction for all resources (previously hardcoded to `/users/` only)
+  - Jackson ObjectMapper for JSON parsing (replaces fragile indexOf/substring)
+  - PATCH, HEAD, OPTIONS method support added
+  - Automatic cleanup/teardown of created resources in reverse order
+  - Seed-based `Random` for reproducible test sequences
+- ✅ **Enhanced Test Generation**
+  - Integration tests generate schema-derived request bodies (previously empty `"{}"`)
+  - Response schema validation: required fields presence and type checking
+  - Authentication setup generated from OAS `securitySchemes` (Bearer, API key, OAuth2)
+  - Negative test cases: empty body, malformed JSON, boundary values, wrong types, missing required fields
+  - RBAC testing from OAS security scopes (correct scope, insufficient scope, wrong role)
+  - CORS preflight and unauthorized origin tests
+  - Rate limiting verification tests
+- ✅ **SLA Monitoring Improvements**
+  - Real `AtomicLong` metric counters replace hardcoded stubs (150.0ms, 0.01 error rate, etc.)
+  - Per-endpoint tracking via `ConcurrentHashMap`
+  - Correlation ID propagation via `CorrelationIdFilter` (X-Trace-Id header)
+  - Atomic sliding-window rate limiter with CAS loop (fixes TOCTOU race condition)
+  - SLA thresholds derived from OAS `x-sla-*` extensions
+  - Standard Micrometer metric names in Grafana dashboard (`http_server_requests_seconds_*`)
+  - 7-panel Grafana dashboard: p50/p75/p95/p99, request rate, per-endpoint rates, error rate, SLA compliance, availability
+  - Fixed Dockerfile: `eclipse-temurin:21-jre` (was `openjdk:11-jre-slim`)
+  - Fixed Prometheus config: `/metrics` path (was `/actuator/prometheus`)
+  - Fixed Docker Compose healthcheck: `/sla/status` (was `/actuator/health`)
+  - Restricted AWS API Gateway policy to actual API paths (was open `*/*/*`)
+- ✅ **Code Quality Improvements**
+  - Removed 4 `catch (StackOverflowError)` blocks, replaced with proper cycle detection via depth limits
+  - Replaced ThreadLocal with plain instance field in JerseyGenerator (documented as non-thread-safe)
+  - Extracted shared `Constants.HTTP_METHODS` array (replaced 14 hardcoded arrays across 11 files)
+  - Deprecated `test/mock/MockDataGenerator`, `test/nfr/NFRTestGenerator`, `test/postman/PostmanTestGenerator` in favor of canonical `testgenerators/` versions
+  - Fixed missing `Base64` import in MockDataGenerator
+  - Fixed undefined `logger` and hardcoded package in generated Application class
+  - Consistent `GenerationException` error handling in SLAProcessor
+  - Defensive copies in SLAConfig constructor
+
+### 1.16-SNAPSHOT
 - ✅ **Simplified Test Resources**
   - **File Simplification**: Reduced test YAML files from ~52,000 lines to ~1,100 lines (98% reduction)
   - **Consistent Naming**: Renamed test files to follow openapi[N].yaml convention for clarity
@@ -2089,7 +2330,12 @@ For security vulnerabilities, please see our [Security Policy](SECURITY.md).
 - **Jersey**: JAX-RS implementation for RESTful web services
 - **Jakarta EE**: Enterprise Java standards
 - **Grizzly**: High-performance HTTP server
-- **OpenAPI Generator**: Code generation inspiration
+- **OpenTelemetry**: Distributed tracing and observability
+- **Micrometer**: Application metrics facade
+- **Prometheus**: Metrics collection and monitoring
+- **Grafana**: Metrics visualization and dashboards
+- **Jackson**: JSON processing
+- **JavaFaker**: Realistic test data generation
 - **Redocly**: Professional documentation tooling
 - **Swagger UI**: Interactive API documentation
 - **Flexmark**: Advanced Markdown processing

@@ -37,10 +37,10 @@ public class SLAConfig {
         this.slaFile = slaFile;
         this.monitoring = monitoring;
         this.alerting = alerting;
-        this.compliance = compliance != null ? compliance : Arrays.asList("gdpr", "iso27001");
+        this.compliance = compliance != null ? new ArrayList<>(compliance) : new ArrayList<>(Arrays.asList("gdpr", "iso27001"));
         this.apiGateway = apiGateway;
-        this.monitoringStack = monitoringStack != null ? monitoringStack : Arrays.asList("prometheus", "grafana");
-        this.additionalProperties = additionalProperties != null ? additionalProperties : new HashMap<>();
+        this.monitoringStack = monitoringStack != null ? new ArrayList<>(monitoringStack) : new ArrayList<>(Arrays.asList("prometheus", "grafana"));
+        this.additionalProperties = additionalProperties != null ? new HashMap<>(additionalProperties) : new HashMap<>();
     }
 
     // Getters and Setters

@@ -1,6 +1,7 @@
 package egain.oassdk;
 
 import egain.oassdk.config.GeneratorConfig;
+import egain.oassdk.core.Constants;
 import egain.oassdk.config.SLAConfig;
 import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.exceptions.GenerationException;
@@ -227,7 +228,7 @@ public class OASSDK implements AutoCloseable {
                 Map<String, Object> filteredPathItem = new LinkedHashMap<>();
 
                 // Copy allowed operations
-                String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+                String[] methods = Constants.HTTP_METHODS;
                 for (String method : methods) {
                     String upperMethod = method.toUpperCase(Locale.ROOT);
                     if (allowedMethods.contains(upperMethod) && pathItem.containsKey(method)) {

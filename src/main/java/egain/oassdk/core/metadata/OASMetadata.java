@@ -1,6 +1,7 @@
 package egain.oassdk.core.metadata;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 
 import java.util.*;
 
@@ -116,7 +117,7 @@ public class OASMetadata {
                 if (pathItem != null) {
                     endpointCount++;
 
-                    String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+                    String[] methods = Constants.HTTP_METHODS;
                     for (String method : methods) {
                         if (pathItem.containsKey(method)) {
                             operationCount++;
@@ -154,7 +155,7 @@ public class OASMetadata {
 
             List<Map<String, Object>> operations = new ArrayList<>();
 
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));

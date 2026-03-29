@@ -1,6 +1,7 @@
 package egain.oassdk.testgenerators.python;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
@@ -72,7 +73,7 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
 
             if (pathItem == null) continue;
 
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));

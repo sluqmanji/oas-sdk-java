@@ -1,7 +1,9 @@
 package egain.oassdk.generators.python;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 import egain.oassdk.config.GeneratorConfig;
+import egain.oassdk.config.ObservabilityConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.core.logging.LoggerConfig;
 import egain.oassdk.generators.CodeGenerator;
@@ -176,6 +178,31 @@ public class FlaskGenerator implements CodeGenerator, ConfigurableGenerator {
 
         content.append("    # Enable CORS\n");
         content.append("    CORS(app)\n\n");
+
+        // Observability: OpenTelemetry + Prometheus
+        ObservabilityConfig obsConfig = config != null ? config.getObservabilityConfig() : null;
+        if (obsConfig != null && obsConfig.isEnabled()) {
+            String svcName = obsConfig.getServiceName() != null ? obsConfig.getServiceName() : getAPITitle(spec);
+            if (obsConfig.isEnableTracing()) {
+                content.append("    # Observability: OpenTelemetry tracing\n");
+                content.append("    from opentelemetry import trace\n");
+                content.append("    from opentelemetry.sdk.trace import TracerProvider\n");
+                content.append("    from opentelemetry.sdk.trace.export import BatchSpanProcessor\n");
+                content.append("    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter\n");
+                content.append("    from opentelemetry.instrumentation.flask import FlaskInstrumentor\n");
+                content.append("    from opentelemetry.sdk.resources import Resource\n\n");
+                content.append("    resource = Resource.create({\"service.name\": \"").append(svcName).append("\"})\n");
+                content.append("    provider = TracerProvider(resource=resource)\n");
+                content.append("    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))\n");
+                content.append("    trace.set_tracer_provider(provider)\n");
+                content.append("    FlaskInstrumentor().instrument_app(app)\n\n");
+            }
+            if (obsConfig.isEnableMetrics()) {
+                content.append("    # Observability: Prometheus metrics\n");
+                content.append("    from prometheus_flask_exporter import PrometheusMetrics\n");
+                content.append("    metrics = PrometheusMetrics(app)\n\n");
+            }
+        }
 
         content.append("    # Register error handlers\n");
         content.append("    register_error_handlers(app)\n\n");
@@ -676,7 +703,7 @@ public class FlaskGenerator implements CodeGenerator, ConfigurableGenerator {
             if (pathItem == null) continue;
 
             // Check all HTTP methods
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
@@ -958,11 +985,27 @@ public class FlaskGenerator implements CodeGenerator, ConfigurableGenerator {
      * Generate requirements.txt
      */
     private String generateRequirementsTxt() {
-        return "Flask==3.0.0\n" +
-                "Flask-CORS==4.0.0\n" +
-                "python-dotenv==1.0.0\n" +
-                "gunicorn==21.2.0\n" +
-                "marshmallow==3.20.1\n";
+        StringBuilder reqs = new StringBuilder();
+        reqs.append("Flask==3.0.0\n");
+        reqs.append("Flask-CORS==4.0.0\n");
+        reqs.append("python-dotenv==1.0.0\n");
+        reqs.append("gunicorn==21.2.0\n");
+        reqs.append("marshmallow==3.20.1\n");
+
+        ObservabilityConfig obsConfig = config != null ? config.getObservabilityConfig() : null;
+        if (obsConfig != null && obsConfig.isEnabled()) {
+            if (obsConfig.isEnableTracing()) {
+                reqs.append("opentelemetry-api==1.22.0\n");
+                reqs.append("opentelemetry-sdk==1.22.0\n");
+                reqs.append("opentelemetry-exporter-otlp==1.22.0\n");
+                reqs.append("opentelemetry-instrumentation-flask==0.43b0\n");
+            }
+            if (obsConfig.isEnableMetrics()) {
+                reqs.append("prometheus-flask-exporter==0.23.0\n");
+            }
+        }
+
+        return reqs.toString();
     }
 
     /**
@@ -1134,7 +1177,7 @@ public class FlaskGenerator implements CodeGenerator, ConfigurableGenerator {
             if (pathItem == null) continue;
 
             // Process each HTTP method
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));

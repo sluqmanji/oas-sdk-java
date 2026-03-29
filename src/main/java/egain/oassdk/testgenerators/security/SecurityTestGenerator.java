@@ -2,6 +2,7 @@ package egain.oassdk.testgenerators.security;
 
 import egain.oassdk.Util;
 import egain.oassdk.config.TestConfig;
+import egain.oassdk.core.Constants;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
 import egain.oassdk.testgenerators.TestGenerator;
@@ -153,6 +154,12 @@ public class SecurityTestGenerator implements TestGenerator, ConfigurableTestGen
         // Path traversal tests
         generatePathTraversalTests(sb, spec);
 
+        // CORS tests
+        generateCORSTests(sb, spec);
+
+        // Rate limiting tests
+        generateRateLimitingTests(sb, spec);
+
         sb.append("}\n");
 
         return sb.toString();
@@ -170,7 +177,7 @@ public class SecurityTestGenerator implements TestGenerator, ConfigurableTestGen
                 Map<String, Object> pathItem = Util.asStringObjectMap(pathEntry.getValue());
                 if (pathItem == null) continue;
 
-                String[] methods = {"get", "post", "put", "delete"};
+                String[] methods = Constants.HTTP_METHODS;
                 for (String method : methods) {
                     if (pathItem.containsKey(method)) {
                         Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
@@ -232,13 +239,112 @@ public class SecurityTestGenerator implements TestGenerator, ConfigurableTestGen
     private void generateAuthorizationTests(StringBuilder sb, Map<String, Object> spec) {
         sb.append("    // ========== Authorization Tests ==========\n\n");
 
-        sb.append("    @Test\n");
-        sb.append("    @DisplayName(\"Authorization: Access Control\")\n");
-        sb.append("    void testAuthorization_AccessControl() throws Exception {\n");
-        sb.append("        // TODO: Implement authorization tests based on role-based access control\n");
-        sb.append("        // This test should verify that users can only access resources they are authorized for\n");
-        sb.append("        assertTrue(true, \"Authorization test placeholder\");\n");
-        sb.append("    }\n\n");
+        // Extract security schemes from components
+        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+        Map<String, Object> securitySchemes = null;
+        if (components != null) {
+            securitySchemes = Util.asStringObjectMap(components.get("securitySchemes"));
+        }
+
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths == null || paths.isEmpty()) {
+            return;
+        }
+
+        // Iterate over every operation that declares security scopes
+        for (Map.Entry<String, Object> pathEntry : paths.entrySet()) {
+            String path = pathEntry.getKey();
+            Map<String, Object> pathItem = Util.asStringObjectMap(pathEntry.getValue());
+            if (pathItem == null) continue;
+
+            for (String method : Constants.HTTP_METHODS) {
+                if (!pathItem.containsKey(method)) continue;
+                Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
+                if (operation == null || !operation.containsKey("security")) continue;
+
+                List<Map<String, Object>> securityRequirements =
+                        Util.asStringObjectMapList(operation.get("security"));
+                if (securityRequirements == null) continue;
+
+                for (Map<String, Object> requirement : securityRequirements) {
+                    for (Map.Entry<String, Object> schemeEntry : requirement.entrySet()) {
+                        String schemeName = schemeEntry.getKey();
+                        Object scopesObj = schemeEntry.getValue();
+                        if (!(scopesObj instanceof List)) continue;
+
+                        @SuppressWarnings("unchecked")
+                        List<String> requiredScopes = (List<String>) scopesObj;
+                        if (requiredScopes.isEmpty()) continue;
+
+                        String safePath = sanitizePath(path);
+                        String scopeList = String.join(", ", requiredScopes);
+
+                        // Test: correct scope should succeed (200)
+                        sb.append("    @Test\n");
+                        sb.append("    @DisplayName(\"Authorization: ").append(method.toUpperCase()).append(" ").append(path)
+                                .append(" - Correct Scope (").append(scopeList).append(")\")\n");
+                        sb.append("    void testAuthorization_CorrectScope_").append(safePath).append("_").append(method).append("() throws Exception {\n");
+                        sb.append("        // Arrange - Request with a token bearing the required scopes: ").append(scopeList).append("\n");
+                        sb.append("        URI uri = URI.create(BASE_URL + \"").append(path).append("\");\n");
+                        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                        sb.append("            .uri(uri)\n");
+                        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+                        sb.append("            .").append(method.toUpperCase()).append("()\n");
+                        sb.append("            .header(\"Accept\", \"application/json\")\n");
+                        sb.append("            .header(\"Authorization\", \"Bearer <TOKEN_WITH_SCOPES: ").append(scopeList).append(">\")\n");
+                        sb.append("            .build();\n\n");
+                        sb.append("        // Act\n");
+                        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                        sb.append("        // Assert - Authorized request should succeed\n");
+                        sb.append("        assertEquals(200, response.statusCode(),\n");
+                        sb.append("            \"Expected 200 OK for request with correct scopes [").append(scopeList).append("], got \" + response.statusCode());\n");
+                        sb.append("    }\n\n");
+
+                        // Test: insufficient scope should be forbidden (403)
+                        sb.append("    @Test\n");
+                        sb.append("    @DisplayName(\"Authorization: ").append(method.toUpperCase()).append(" ").append(path)
+                                .append(" - Insufficient Scope\")\n");
+                        sb.append("    void testAuthorization_InsufficientScope_").append(safePath).append("_").append(method).append("() throws Exception {\n");
+                        sb.append("        // Arrange - Request with a token that does NOT have the required scopes\n");
+                        sb.append("        URI uri = URI.create(BASE_URL + \"").append(path).append("\");\n");
+                        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                        sb.append("            .uri(uri)\n");
+                        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+                        sb.append("            .").append(method.toUpperCase()).append("()\n");
+                        sb.append("            .header(\"Accept\", \"application/json\")\n");
+                        sb.append("            .header(\"Authorization\", \"Bearer <TOKEN_WITHOUT_REQUIRED_SCOPES>\")\n");
+                        sb.append("            .build();\n\n");
+                        sb.append("        // Act\n");
+                        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                        sb.append("        // Assert - Insufficient scope should return 403 Forbidden\n");
+                        sb.append("        assertEquals(403, response.statusCode(),\n");
+                        sb.append("            \"Expected 403 Forbidden for token without required scopes [").append(scopeList).append("], got \" + response.statusCode());\n");
+                        sb.append("    }\n\n");
+
+                        // Test: different role accessing unauthorized endpoint (403)
+                        sb.append("    @Test\n");
+                        sb.append("    @DisplayName(\"Authorization: ").append(method.toUpperCase()).append(" ").append(path)
+                                .append(" - Wrong Role\")\n");
+                        sb.append("    void testAuthorization_WrongRole_").append(safePath).append("_").append(method).append("() throws Exception {\n");
+                        sb.append("        // Arrange - Request with a valid token for a different role that lacks [").append(scopeList).append("]\n");
+                        sb.append("        URI uri = URI.create(BASE_URL + \"").append(path).append("\");\n");
+                        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                        sb.append("            .uri(uri)\n");
+                        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+                        sb.append("            .").append(method.toUpperCase()).append("()\n");
+                        sb.append("            .header(\"Accept\", \"application/json\")\n");
+                        sb.append("            .header(\"Authorization\", \"Bearer <TOKEN_WRONG_ROLE>\")\n");
+                        sb.append("            .build();\n\n");
+                        sb.append("        // Act\n");
+                        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                        sb.append("        // Assert - Wrong role should be forbidden\n");
+                        sb.append("        assertEquals(403, response.statusCode(),\n");
+                        sb.append("            \"Expected 403 Forbidden for wrong-role token accessing [").append(method.toUpperCase()).append(" ").append(path).append("], got \" + response.statusCode());\n");
+                        sb.append("    }\n\n");
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -378,6 +484,113 @@ public class SecurityTestGenerator implements TestGenerator, ConfigurableTestGen
             sb.append("        }\n");
             sb.append("    }\n\n");
         }
+    }
+
+    /**
+     * Generate CORS (Cross-Origin Resource Sharing) tests
+     */
+    private void generateCORSTests(StringBuilder sb, Map<String, Object> spec) {
+        sb.append("    // ========== CORS Tests ==========\n\n");
+
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths == null || paths.isEmpty()) {
+            return;
+        }
+
+        String firstPath = paths.keySet().iterator().next();
+
+        // Test: OPTIONS preflight returns correct CORS headers
+        sb.append("    @Test\n");
+        sb.append("    @DisplayName(\"CORS: Preflight OPTIONS request returns correct headers\")\n");
+        sb.append("    void testCORS_PreflightReturnsCorrectHeaders() throws Exception {\n");
+        sb.append("        // Arrange - Send OPTIONS preflight request with Origin header\n");
+        sb.append("        URI uri = URI.create(BASE_URL + \"").append(firstPath).append("\");\n");
+        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+        sb.append("            .uri(uri)\n");
+        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+        sb.append("            .method(\"OPTIONS\", HttpRequest.BodyPublishers.noBody())\n");
+        sb.append("            .header(\"Origin\", \"https://malicious-site.example.com\")\n");
+        sb.append("            .header(\"Access-Control-Request-Method\", \"GET\")\n");
+        sb.append("            .header(\"Access-Control-Request-Headers\", \"Authorization\")\n");
+        sb.append("            .build();\n\n");
+        sb.append("        // Act\n");
+        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+        sb.append("        // Assert - Preflight should return 200/204 with CORS headers\n");
+        sb.append("        assertTrue(response.statusCode() == 200 || response.statusCode() == 204,\n");
+        sb.append("            \"Expected 200 or 204 for OPTIONS preflight, got \" + response.statusCode());\n");
+        sb.append("        // Verify CORS headers are present\n");
+        sb.append("        assertTrue(response.headers().firstValue(\"Access-Control-Allow-Methods\").isPresent(),\n");
+        sb.append("            \"Preflight response must include Access-Control-Allow-Methods header\");\n");
+        sb.append("        assertTrue(response.headers().firstValue(\"Access-Control-Allow-Headers\").isPresent(),\n");
+        sb.append("            \"Preflight response must include Access-Control-Allow-Headers header\");\n");
+        sb.append("    }\n\n");
+
+        // Test: cross-origin request without proper headers is rejected
+        sb.append("    @Test\n");
+        sb.append("    @DisplayName(\"CORS: Cross-origin request without proper Origin is rejected\")\n");
+        sb.append("    void testCORS_UnauthorizedOriginRejected() throws Exception {\n");
+        sb.append("        // Arrange - Send request with an unauthorized Origin\n");
+        sb.append("        URI uri = URI.create(BASE_URL + \"").append(firstPath).append("\");\n");
+        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+        sb.append("            .uri(uri)\n");
+        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+        sb.append("            .GET()\n");
+        sb.append("            .header(\"Accept\", \"application/json\")\n");
+        sb.append("            .header(\"Origin\", \"https://malicious-site.example.com\")\n");
+        sb.append("            .build();\n\n");
+        sb.append("        // Act\n");
+        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+        sb.append("        // Assert - Unauthorized origin should not be reflected in Access-Control-Allow-Origin\n");
+        sb.append("        Optional<String> allowOrigin = response.headers().firstValue(\"Access-Control-Allow-Origin\");\n");
+        sb.append("        assertTrue(allowOrigin.isEmpty() || !allowOrigin.get().equals(\"https://malicious-site.example.com\"),\n");
+        sb.append("            \"Access-Control-Allow-Origin must not reflect an unauthorized origin\");\n");
+        sb.append("        // A wildcard '*' with credentials is also a misconfiguration\n");
+        sb.append("        if (allowOrigin.isPresent() && allowOrigin.get().equals(\"*\")) {\n");
+        sb.append("            assertTrue(response.headers().firstValue(\"Access-Control-Allow-Credentials\").isEmpty()\n");
+        sb.append("                || !response.headers().firstValue(\"Access-Control-Allow-Credentials\").get().equals(\"true\"),\n");
+        sb.append("                \"Wildcard Access-Control-Allow-Origin must not be combined with Access-Control-Allow-Credentials: true\");\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Generate rate limiting tests
+     */
+    private void generateRateLimitingTests(StringBuilder sb, Map<String, Object> spec) {
+        sb.append("    // ========== Rate Limiting Tests ==========\n\n");
+
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths == null || paths.isEmpty()) {
+            return;
+        }
+
+        String firstPath = paths.keySet().iterator().next();
+
+        sb.append("    @Test\n");
+        sb.append("    @DisplayName(\"Rate Limiting: Rapid requests return 429 Too Many Requests\")\n");
+        sb.append("    void testRateLimiting_RapidRequestsReturn429() throws Exception {\n");
+        sb.append("        // Arrange - Prepare a burst of rapid requests to the same endpoint\n");
+        sb.append("        URI uri = URI.create(BASE_URL + \"").append(firstPath).append("\");\n");
+        sb.append("        int burstSize = 50;\n");
+        sb.append("        boolean rateLimited = false;\n\n");
+        sb.append("        // Act - Send requests in rapid succession\n");
+        sb.append("        for (int i = 0; i < burstSize; i++) {\n");
+        sb.append("            HttpRequest request = HttpRequest.newBuilder()\n");
+        sb.append("                .uri(uri)\n");
+        sb.append("                .timeout(REQUEST_TIMEOUT)\n");
+        sb.append("                .GET()\n");
+        sb.append("                .header(\"Accept\", \"application/json\")\n");
+        sb.append("                .build();\n");
+        sb.append("            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n");
+        sb.append("            if (response.statusCode() == 429) {\n");
+        sb.append("                rateLimited = true;\n");
+        sb.append("                break;\n");
+        sb.append("            }\n");
+        sb.append("        }\n\n");
+        sb.append("        // Assert - At least one request should have been rate-limited\n");
+        sb.append("        assertTrue(rateLimited,\n");
+        sb.append("            \"Expected at least one 429 Too Many Requests response after \" + burstSize + \" rapid requests\");\n");
+        sb.append("    }\n\n");
     }
 
     /**

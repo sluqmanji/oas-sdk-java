@@ -1,7 +1,9 @@
 package egain.oassdk.generators.python;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 import egain.oassdk.config.GeneratorConfig;
+import egain.oassdk.config.ObservabilityConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.generators.CodeGenerator;
 import egain.oassdk.generators.ConfigurableGenerator;
@@ -155,6 +157,31 @@ public class FastAPIGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("    allow_methods=[\"*\"],\n");
         content.append("    allow_headers=[\"*\"],\n");
         content.append(")\n\n");
+
+        // Observability: OpenTelemetry + Prometheus
+        ObservabilityConfig obsConfig = config != null ? config.getObservabilityConfig() : null;
+        if (obsConfig != null && obsConfig.isEnabled()) {
+            String svcName = obsConfig.getServiceName() != null ? obsConfig.getServiceName() : getAPITitle(spec);
+            if (obsConfig.isEnableTracing()) {
+                content.append("# Observability: OpenTelemetry tracing\n");
+                content.append("from opentelemetry import trace\n");
+                content.append("from opentelemetry.sdk.trace import TracerProvider\n");
+                content.append("from opentelemetry.sdk.trace.export import BatchSpanProcessor\n");
+                content.append("from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter\n");
+                content.append("from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor\n");
+                content.append("from opentelemetry.sdk.resources import Resource\n\n");
+                content.append("resource = Resource.create({\"service.name\": \"").append(svcName).append("\"})\n");
+                content.append("provider = TracerProvider(resource=resource)\n");
+                content.append("provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))\n");
+                content.append("trace.set_tracer_provider(provider)\n");
+                content.append("FastAPIInstrumentor.instrument_app(app)\n\n");
+            }
+            if (obsConfig.isEnableMetrics()) {
+                content.append("# Observability: Prometheus metrics\n");
+                content.append("from prometheus_fastapi_instrumentator import Instrumentator\n");
+                content.append("Instrumentator().instrument(app).expose(app, endpoint=\"/metrics\")\n\n");
+            }
+        }
 
         content.append("# Setup exception handlers\n");
         content.append("setup_exception_handlers(app)\n\n");
@@ -631,7 +658,7 @@ public class FastAPIGenerator implements CodeGenerator, ConfigurableGenerator {
             if (pathItem == null) continue;
 
             // Check all HTTP methods
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
@@ -934,13 +961,27 @@ public class FastAPIGenerator implements CodeGenerator, ConfigurableGenerator {
      * Generate requirements.txt
      */
     private String generateRequirementsTxt() {
-        return """
-                fastapi==0.104.1
-                uvicorn[standard]==0.24.0
-                pydantic==2.5.0
-                pydantic-settings==2.1.0
-                python-multipart==0.0.6
-                """;
+        StringBuilder reqs = new StringBuilder();
+        reqs.append("fastapi==0.104.1\n");
+        reqs.append("uvicorn[standard]==0.24.0\n");
+        reqs.append("pydantic==2.5.0\n");
+        reqs.append("pydantic-settings==2.1.0\n");
+        reqs.append("python-multipart==0.0.6\n");
+
+        ObservabilityConfig obsConfig = config != null ? config.getObservabilityConfig() : null;
+        if (obsConfig != null && obsConfig.isEnabled()) {
+            if (obsConfig.isEnableTracing()) {
+                reqs.append("opentelemetry-api==1.22.0\n");
+                reqs.append("opentelemetry-sdk==1.22.0\n");
+                reqs.append("opentelemetry-exporter-otlp==1.22.0\n");
+                reqs.append("opentelemetry-instrumentation-fastapi==0.43b0\n");
+            }
+            if (obsConfig.isEnableMetrics()) {
+                reqs.append("prometheus-fastapi-instrumentator==6.1.0\n");
+            }
+        }
+
+        return reqs.toString();
     }
 
     /**
@@ -1079,7 +1120,7 @@ public class FastAPIGenerator implements CodeGenerator, ConfigurableGenerator {
             if (pathItem == null) continue;
 
             // Process each HTTP method
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options"};
+            String[] methods = Constants.HTTP_METHODS;
             for (String method : methods) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));

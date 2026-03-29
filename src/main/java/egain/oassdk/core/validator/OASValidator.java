@@ -1,6 +1,7 @@
 package egain.oassdk.core.validator;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 import egain.oassdk.core.exceptions.ValidationException;
 
 import java.util.*;
@@ -157,7 +158,7 @@ public class OASValidator {
         if (pathItem == null) return;
 
         // Validate HTTP methods
-        String[] validMethods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+        String[] validMethods = Constants.HTTP_METHODS;
         for (String method : validMethods) {
             if (pathItem.containsKey(method)) {
                 Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));

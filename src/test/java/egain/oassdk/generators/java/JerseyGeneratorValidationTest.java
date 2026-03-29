@@ -275,10 +275,9 @@ public class JerseyGeneratorValidationTest {
     @DisplayName("escapePatternForJavaStringLiteral preserves regex grouping parentheses")
     public void testEscapePatternPreservesGroupingParens() throws Exception {
         String pattern = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$";
-        Method m = JerseyGenerator.class.getDeclaredMethod("escapePatternForJavaStringLiteral", String.class);
+        Method m = JerseyNamingUtils.class.getDeclaredMethod("escapePatternForJavaStringLiteral", String.class);
         m.setAccessible(true);
-        JerseyGenerator gen = new JerseyGenerator();
-        String result = (String) m.invoke(gen, pattern);
+        String result = (String) m.invoke(null, pattern);
         // Method doubles backslashes for Java string; grouping parens ( ) must stay unescaped
         assertTrue(result.contains("(\\\\.\\\\d{3})?"), "Result should contain (\\\\.\\\\d{3})? i.e. grouping for optional milliseconds");
         assertFalse(result.contains("\\\\(\\.\\\\d{3}\\)"), "Result must not escape grouping parentheses as \\( \\)");

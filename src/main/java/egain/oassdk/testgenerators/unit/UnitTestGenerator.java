@@ -2,6 +2,7 @@ package egain.oassdk.testgenerators.unit;
 
 import egain.oassdk.Util;
 import egain.oassdk.config.TestConfig;
+import egain.oassdk.core.Constants;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
 import egain.oassdk.testgenerators.TestGenerator;
@@ -73,8 +74,7 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
 
             if (pathItem == null) continue;
 
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
-            for (String method : methods) {
+            for (String method : Constants.HTTP_METHODS) {
                 if (pathItem.containsKey(method)) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
                     if (operation == null) continue;
@@ -319,7 +319,12 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                 sb.append("        // Act & Assert\n");
                 sb.append("        assertNotNull(request, \"Request should not be null\");\n");
                 sb.append("        assertFalse(uri.toString().contains(\"").append(paramName).append("=\"), \"URI should not contain missing required parameter ").append(paramName).append("\");\n");
-                sb.append("        // TODO: Mock HTTP client and verify 400 Bad Request response when ").append(paramName).append(" is missing\n");
+                sb.append("        // Verify the request was built without the required parameter\n");
+                sb.append("        String uriString = uri.toString();\n");
+                sb.append("        assertFalse(uriString.contains(\"").append(paramName).append("=\"),\n");
+                sb.append("            \"Request URI should not include the missing required parameter '").append(paramName).append("'\");\n");
+                sb.append("        // When sent to a running server, this request should return 400 Bad Request\n");
+                sb.append("        // because the required query parameter '").append(paramName).append("' is absent.\n");
                 sb.append("    }\n\n");
             }
 
@@ -372,8 +377,15 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                     sb.append("        // Act & Assert\n");
                     sb.append("        assertNotNull(request, \"Request should not be null\");\n");
                     sb.append("        assertTrue(uri.toString().contains(\"").append(paramName).append("=\"), \"URI should contain parameter ").append(paramName).append("\");\n");
-                    sb.append("        assertTrue(uri.toString().contains(invalidValue), \"URI should contain invalid value\");\n");
-                    sb.append("        // TODO: Mock HTTP client and verify 400 Bad Request response for invalid ").append(paramName).append(" format (pattern: ").append(pattern).append(")\n");
+                    sb.append("        // Verify the invalid value is present in the URI (it was submitted as-is)\n");
+                    sb.append("        String uriString = uri.toString();\n");
+                    sb.append("        assertTrue(uriString.contains(invalidValue) || invalidValue.isEmpty(),\n");
+                    sb.append("            \"URI should contain the invalid value for parameter '").append(paramName).append("'\");\n");
+                    sb.append("        // Validate that the invalid value does NOT match the expected pattern\n");
+                    sb.append("        assertFalse(invalidValue.matches(\"").append(pattern.replace("\\", "\\\\")).append("\"),\n");
+                    sb.append("            \"The test value should not match the valid pattern '").append(pattern.replace("\\", "\\\\")).append("'\");\n");
+                    sb.append("        // When sent to a running server, this request should return 400 Bad Request\n");
+                    sb.append("        // because '").append(paramName).append("' does not match the required pattern.\n");
                     sb.append("    }\n\n");
                 }
             }
@@ -418,13 +430,273 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                 sb.append("            .header(\"Accept\", \"application/json\")\n");
                 sb.append("            .build();\n\n");
                 sb.append("        // Act\n");
-                sb.append("        // TODO: Mock HTTP client to return ").append(statusCode).append(" status\n");
-                sb.append("        // HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
                 sb.append("        // Assert\n");
-                sb.append("        assertNotNull(request, \"Request should not be null\");\n");
-                sb.append("        // assertEquals(").append(statusCode).append(", response.statusCode(), \"Response status should be ").append(statusCode).append("\");\n");
-                sb.append("        // TODO: Add assertions for response body, headers, etc. based on OpenAPI response schema\n");
+                sb.append("        assertNotNull(response, \"Response should not be null\");\n");
+                sb.append("        assertEquals(").append(statusCode).append(", response.statusCode(), \"Response status should be ").append(statusCode).append("\");\n");
+
+                // Extract response schema for additional assertions
+                Map<String, Object> responseObj = Util.asStringObjectMap(responses.get(statusCode));
+                Map<String, Object> content = responseObj != null ? Util.asStringObjectMap(responseObj.get("content")) : null;
+
+                // For 200 responses, assert response body is not null/empty
+                if ("200".equals(statusCode) || "201".equals(statusCode)) {
+                    sb.append("        assertNotNull(response.body(), \"Response body should not be null for ").append(statusCode).append(" response\");\n");
+                    sb.append("        assertFalse(response.body().isEmpty(), \"Response body should not be empty for ").append(statusCode).append(" response\");\n");
+                }
+
+                if (content != null) {
+                    for (Map.Entry<String, Object> contentEntry : content.entrySet()) {
+                        String contentType = contentEntry.getKey();
+                        // Verify content-type header
+                        sb.append("        assertTrue(response.headers().firstValue(\"Content-Type\").isPresent(),\n");
+                        sb.append("            \"Response should have Content-Type header\");\n");
+                        sb.append("        assertTrue(response.headers().firstValue(\"Content-Type\").get().contains(\"").append(contentType).append("\"),\n");
+                        sb.append("            \"Content-Type should contain '").append(contentType).append("'\");\n");
+
+                        // Extract schema for required fields
+                        Map<String, Object> mediaType = Util.asStringObjectMap(contentEntry.getValue());
+                        Map<String, Object> responseSchema = mediaType != null ? Util.asStringObjectMap(mediaType.get("schema")) : null;
+                        if (responseSchema != null) {
+                            List<String> requiredFields = Util.asStringList(responseSchema.get("required"));
+                            if (requiredFields != null && !requiredFields.isEmpty()) {
+                                sb.append("        // Validate required fields from response schema\n");
+                                sb.append("        String responseBody = response.body();\n");
+                                for (String field : requiredFields) {
+                                    sb.append("        assertTrue(responseBody.contains(\"\\\"").append(field).append("\\\"\"),\n");
+                                    sb.append("            \"Response JSON should contain required field '").append(field).append("'\");\n");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 sb.append("    }\n\n");
+            }
+        }
+
+        // Negative test cases for operations with request bodies (POST, PUT, PATCH)
+        if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
+            // Extract requestBody schema for boundary tests
+            Map<String, Object> requestBody = operation.containsKey("requestBody")
+                    ? Util.asStringObjectMap(operation.get("requestBody"))
+                    : null;
+
+            // Test: Empty request body expecting 400
+            sb.append("    @Test\n");
+            sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                    .append(" - Empty Request Body\")\n");
+            sb.append("    public void test").append(capitalize(testMethodName)).append("_EmptyRequestBody() throws Exception {\n");
+            sb.append("        // Arrange\n");
+            sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+            for (Map<String, Object> param : parameters) {
+                String paramName = (String) param.get("name");
+                String paramIn = (String) param.get("in");
+                if ("path".equals(paramIn)) {
+                    String example = getParameterExample(param);
+                    sb.append("        pathParams.put(\"").append(paramName).append("\", \"").append(example).append("\");\n");
+                }
+            }
+            sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+            sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+            sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(\"\"))\n");
+            sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+            sb.append("            .header(\"Accept\", \"application/json\")\n");
+            sb.append("            .build();\n\n");
+            sb.append("        // Act\n");
+            sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+            sb.append("        // Assert\n");
+            sb.append("        assertEquals(400, response.statusCode(), \"Empty request body should return 400 Bad Request\");\n");
+            sb.append("    }\n\n");
+
+            // Test: Malformed JSON request body expecting 400
+            sb.append("    @Test\n");
+            sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                    .append(" - Malformed JSON Request Body\")\n");
+            sb.append("    public void test").append(capitalize(testMethodName)).append("_MalformedJsonBody() throws Exception {\n");
+            sb.append("        // Arrange\n");
+            sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+            for (Map<String, Object> param : parameters) {
+                String paramName = (String) param.get("name");
+                String paramIn = (String) param.get("in");
+                if ("path".equals(paramIn)) {
+                    String example = getParameterExample(param);
+                    sb.append("        pathParams.put(\"").append(paramName).append("\", \"").append(example).append("\");\n");
+                }
+            }
+            sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+            sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+            sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(\"not json\"))\n");
+            sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+            sb.append("            .header(\"Accept\", \"application/json\")\n");
+            sb.append("            .build();\n\n");
+            sb.append("        // Act\n");
+            sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+            sb.append("        // Assert\n");
+            sb.append("        assertEquals(400, response.statusCode(), \"Malformed JSON body should return 400 Bad Request\");\n");
+            sb.append("    }\n\n");
+
+            // Boundary value tests based on schema constraints
+            if (requestBody != null) {
+                Map<String, Object> rbContent = Util.asStringObjectMap(requestBody.get("content"));
+                if (rbContent != null) {
+                    Map<String, Object> jsonContent = Util.asStringObjectMap(rbContent.get("application/json"));
+                    Map<String, Object> rbSchema = jsonContent != null ? Util.asStringObjectMap(jsonContent.get("schema")) : null;
+                    Map<String, Object> properties = rbSchema != null ? Util.asStringObjectMap(rbSchema.get("properties")) : null;
+
+                    if (properties != null) {
+                        for (Map.Entry<String, Object> propEntry : properties.entrySet()) {
+                            String propName = propEntry.getKey();
+                            Map<String, Object> propSchema = Util.asStringObjectMap(propEntry.getValue());
+                            if (propSchema == null) continue;
+
+                            String propType = (String) propSchema.get("type");
+
+                            // minLength / maxLength boundary tests for string fields
+                            if ("string".equals(propType)) {
+                                if (propSchema.containsKey("minLength")) {
+                                    int minLen = ((Number) propSchema.get("minLength")).intValue();
+                                    if (minLen > 0) {
+                                        String tooShort = "\"a\"".substring(0, Math.max(1, minLen - 1));
+                                        sb.append("    @Test\n");
+                                        sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                                                .append(" - Boundary: ").append(propName).append(" below minLength\")\n");
+                                        sb.append("    public void test").append(capitalize(testMethodName)).append("_Boundary_").append(capitalize(propName)).append("_BelowMinLength() throws Exception {\n");
+                                        sb.append("        // Arrange - value shorter than minLength ").append(minLen).append("\n");
+                                        sb.append("        String tooShortValue = \"").append("a".repeat(Math.max(0, minLen - 1))).append("\";\n");
+                                        sb.append("        String body = \"{\\\"").append(propName).append("\\\": \\\"\" + tooShortValue + \"\\\"}\";\n");
+                                        sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+                                        for (Map<String, Object> param : parameters) {
+                                            String pName = (String) param.get("name");
+                                            String pIn = (String) param.get("in");
+                                            if ("path".equals(pIn)) {
+                                                sb.append("        pathParams.put(\"").append(pName).append("\", \"").append(getParameterExample(param)).append("\");\n");
+                                            }
+                                        }
+                                        sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+                                        sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+                                        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                                        sb.append("            .uri(uri)\n");
+                                        sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(body))\n");
+                                        sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+                                        sb.append("            .header(\"Accept\", \"application/json\")\n");
+                                        sb.append("            .build();\n\n");
+                                        sb.append("        // Act\n");
+                                        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                                        sb.append("        // Assert\n");
+                                        sb.append("        assertEquals(400, response.statusCode(),\n");
+                                        sb.append("            \"Value below minLength for '").append(propName).append("' should return 400\");\n");
+                                        sb.append("    }\n\n");
+                                    }
+                                }
+                                if (propSchema.containsKey("maxLength")) {
+                                    int maxLen = ((Number) propSchema.get("maxLength")).intValue();
+                                    sb.append("    @Test\n");
+                                    sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                                            .append(" - Boundary: ").append(propName).append(" above maxLength\")\n");
+                                    sb.append("    public void test").append(capitalize(testMethodName)).append("_Boundary_").append(capitalize(propName)).append("_AboveMaxLength() throws Exception {\n");
+                                    sb.append("        // Arrange - value longer than maxLength ").append(maxLen).append("\n");
+                                    sb.append("        String tooLongValue = \"").append("a".repeat(maxLen + 1)).append("\";\n");
+                                    sb.append("        String body = \"{\\\"").append(propName).append("\\\": \\\"\" + tooLongValue + \"\\\"}\";\n");
+                                    sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+                                    for (Map<String, Object> param : parameters) {
+                                        String pName = (String) param.get("name");
+                                        String pIn = (String) param.get("in");
+                                        if ("path".equals(pIn)) {
+                                            sb.append("        pathParams.put(\"").append(pName).append("\", \"").append(getParameterExample(param)).append("\");\n");
+                                        }
+                                    }
+                                    sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+                                    sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+                                    sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                                    sb.append("            .uri(uri)\n");
+                                    sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(body))\n");
+                                    sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+                                    sb.append("            .header(\"Accept\", \"application/json\")\n");
+                                    sb.append("            .build();\n\n");
+                                    sb.append("        // Act\n");
+                                    sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                                    sb.append("        // Assert\n");
+                                    sb.append("        assertEquals(400, response.statusCode(),\n");
+                                    sb.append("            \"Value above maxLength for '").append(propName).append("' should return 400\");\n");
+                                    sb.append("    }\n\n");
+                                }
+                            }
+
+                            // minimum / maximum boundary tests for numeric fields
+                            if ("integer".equals(propType) || "number".equals(propType)) {
+                                if (propSchema.containsKey("minimum")) {
+                                    Number min = (Number) propSchema.get("minimum");
+                                    sb.append("    @Test\n");
+                                    sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                                            .append(" - Boundary: ").append(propName).append(" below minimum\")\n");
+                                    sb.append("    public void test").append(capitalize(testMethodName)).append("_Boundary_").append(capitalize(propName)).append("_BelowMinimum() throws Exception {\n");
+                                    sb.append("        // Arrange - value below minimum ").append(min).append("\n");
+                                    long belowMin = min.longValue() - 1;
+                                    sb.append("        String body = \"{\\\"").append(propName).append("\\\": ").append(belowMin).append("}\";\n");
+                                    sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+                                    for (Map<String, Object> param : parameters) {
+                                        String pName = (String) param.get("name");
+                                        String pIn = (String) param.get("in");
+                                        if ("path".equals(pIn)) {
+                                            sb.append("        pathParams.put(\"").append(pName).append("\", \"").append(getParameterExample(param)).append("\");\n");
+                                        }
+                                    }
+                                    sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+                                    sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+                                    sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                                    sb.append("            .uri(uri)\n");
+                                    sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(body))\n");
+                                    sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+                                    sb.append("            .header(\"Accept\", \"application/json\")\n");
+                                    sb.append("            .build();\n\n");
+                                    sb.append("        // Act\n");
+                                    sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                                    sb.append("        // Assert\n");
+                                    sb.append("        assertEquals(400, response.statusCode(),\n");
+                                    sb.append("            \"Value below minimum for '").append(propName).append("' should return 400\");\n");
+                                    sb.append("    }\n\n");
+                                }
+                                if (propSchema.containsKey("maximum")) {
+                                    Number max = (Number) propSchema.get("maximum");
+                                    sb.append("    @Test\n");
+                                    sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
+                                            .append(" - Boundary: ").append(propName).append(" above maximum\")\n");
+                                    sb.append("    public void test").append(capitalize(testMethodName)).append("_Boundary_").append(capitalize(propName)).append("_AboveMaximum() throws Exception {\n");
+                                    sb.append("        // Arrange - value above maximum ").append(max).append("\n");
+                                    long aboveMax = max.longValue() + 1;
+                                    sb.append("        String body = \"{\\\"").append(propName).append("\\\": ").append(aboveMax).append("}\";\n");
+                                    sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+                                    for (Map<String, Object> param : parameters) {
+                                        String pName = (String) param.get("name");
+                                        String pIn = (String) param.get("in");
+                                        if ("path".equals(pIn)) {
+                                            sb.append("        pathParams.put(\"").append(pName).append("\", \"").append(getParameterExample(param)).append("\");\n");
+                                        }
+                                    }
+                                    sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
+                                    sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+                                    sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
+                                    sb.append("            .uri(uri)\n");
+                                    sb.append("            .method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(body))\n");
+                                    sb.append("            .header(\"Content-Type\", \"application/json\")\n");
+                                    sb.append("            .header(\"Accept\", \"application/json\")\n");
+                                    sb.append("            .build();\n\n");
+                                    sb.append("        // Act\n");
+                                    sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
+                                    sb.append("        // Assert\n");
+                                    sb.append("        assertEquals(400, response.statusCode(),\n");
+                                    sb.append("            \"Value above maximum for '").append(propName).append("' should return 400\");\n");
+                                    sb.append("    }\n\n");
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -454,17 +726,89 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
         sb.append(" */\n");
         sb.append("public class TestUtils {\n\n");
         sb.append("    /**\n");
-        sb.append("     * Generate valid test data based on schema\n");
+        sb.append("     * Generate valid test data based on schema type.\n");
+        sb.append("     * Returns a sensible default value for each OpenAPI schema type.\n");
         sb.append("     */\n");
+        sb.append("    @SuppressWarnings(\"unchecked\")\n");
         sb.append("    public static Object generateTestData(Map<String, Object> schema) {\n");
-        sb.append("        // TODO: Implement test data generation based on schema\n");
-        sb.append("        return null;\n");
+        sb.append("        if (schema == null) {\n");
+        sb.append("            return null;\n");
+        sb.append("        }\n");
+        sb.append("        String type = (String) schema.get(\"type\");\n");
+        sb.append("        if (type == null) {\n");
+        sb.append("            return \"test\";\n");
+        sb.append("        }\n");
+        sb.append("        switch (type) {\n");
+        sb.append("            case \"string\":\n");
+        sb.append("                if (schema.containsKey(\"enum\")) {\n");
+        sb.append("                    List<String> enumValues = (List<String>) schema.get(\"enum\");\n");
+        sb.append("                    return enumValues.isEmpty() ? \"test\" : enumValues.get(0);\n");
+        sb.append("                }\n");
+        sb.append("                String format = (String) schema.get(\"format\");\n");
+        sb.append("                if (\"date\".equals(format)) return \"2024-01-15\";\n");
+        sb.append("                if (\"date-time\".equals(format)) return \"2024-01-15T10:30:00Z\";\n");
+        sb.append("                if (\"email\".equals(format)) return \"test@example.com\";\n");
+        sb.append("                if (\"uri\".equals(format)) return \"https://example.com\";\n");
+        sb.append("                if (\"uuid\".equals(format)) return \"550e8400-e29b-41d4-a716-446655440000\";\n");
+        sb.append("                return \"test\";\n");
+        sb.append("            case \"integer\":\n");
+        sb.append("                if (schema.containsKey(\"minimum\")) return ((Number) schema.get(\"minimum\")).intValue();\n");
+        sb.append("                return 123;\n");
+        sb.append("            case \"number\":\n");
+        sb.append("                if (schema.containsKey(\"minimum\")) return ((Number) schema.get(\"minimum\")).doubleValue();\n");
+        sb.append("                return 123.45;\n");
+        sb.append("            case \"boolean\":\n");
+        sb.append("                return true;\n");
+        sb.append("            case \"array\":\n");
+        sb.append("                List<Object> list = new ArrayList<>();\n");
+        sb.append("                Map<String, Object> items = schema.containsKey(\"items\")\n");
+        sb.append("                    ? (Map<String, Object>) schema.get(\"items\") : null;\n");
+        sb.append("                if (items != null) {\n");
+        sb.append("                    list.add(generateTestData(items));\n");
+        sb.append("                }\n");
+        sb.append("                return list;\n");
+        sb.append("            case \"object\":\n");
+        sb.append("                Map<String, Object> obj = new LinkedHashMap<>();\n");
+        sb.append("                Map<String, Object> properties = schema.containsKey(\"properties\")\n");
+        sb.append("                    ? (Map<String, Object>) schema.get(\"properties\") : null;\n");
+        sb.append("                if (properties != null) {\n");
+        sb.append("                    for (Map.Entry<String, Object> entry : properties.entrySet()) {\n");
+        sb.append("                        obj.put(entry.getKey(), generateTestData((Map<String, Object>) entry.getValue()));\n");
+        sb.append("                    }\n");
+        sb.append("                }\n");
+        sb.append("                return obj;\n");
+        sb.append("            default:\n");
+        sb.append("                return \"test\";\n");
+        sb.append("        }\n");
         sb.append("    }\n\n");
         sb.append("    /**\n");
-        sb.append("     * Validate response against schema\n");
+        sb.append("     * Validate that a response object contains all required fields defined in the schema.\n");
+        sb.append("     * @param response The response body as a String (JSON)\n");
+        sb.append("     * @param schema   The OpenAPI schema map\n");
+        sb.append("     * @return true if all required fields are present, false otherwise\n");
         sb.append("     */\n");
+        sb.append("    @SuppressWarnings(\"unchecked\")\n");
         sb.append("    public static boolean validateResponse(Object response, Map<String, Object> schema) {\n");
-        sb.append("        // TODO: Implement response validation against schema\n");
+        sb.append("        if (response == null || schema == null) {\n");
+        sb.append("            return schema == null;\n");
+        sb.append("        }\n");
+        sb.append("        String responseStr = response.toString();\n");
+        sb.append("        // Check required fields\n");
+        sb.append("        List<String> required = schema.containsKey(\"required\")\n");
+        sb.append("            ? (List<String>) schema.get(\"required\") : Collections.emptyList();\n");
+        sb.append("        for (String field : required) {\n");
+        sb.append("            if (!responseStr.contains(\"\\\"\" + field + \"\\\"\")) {\n");
+        sb.append("                return false;\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("        // Check type if specified\n");
+        sb.append("        String type = (String) schema.get(\"type\");\n");
+        sb.append("        if (\"array\".equals(type) && !responseStr.trim().startsWith(\"[\")) {\n");
+        sb.append("            return false;\n");
+        sb.append("        }\n");
+        sb.append("        if (\"object\".equals(type) && !responseStr.trim().startsWith(\"{\")) {\n");
+        sb.append("            return false;\n");
+        sb.append("        }\n");
         sb.append("        return true;\n");
         sb.append("    }\n\n");
         sb.append("}\n");

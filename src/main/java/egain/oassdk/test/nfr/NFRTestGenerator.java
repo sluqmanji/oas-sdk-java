@@ -8,8 +8,12 @@ import java.nio.file.Paths;
 import java.util.Map;
 
 /**
- * Generates NFR testing scripts using SLA specification
+ * Generates NFR testing scripts using SLA specification.
+ *
+ * @deprecated Use {@link egain.oassdk.testgenerators.nfr.NFRTestGenerator} instead.
+ *             This class is retained for backward compatibility with {@link egain.oassdk.test.TestSDK}.
  */
+@Deprecated
 public class NFRTestGenerator {
 
     /**

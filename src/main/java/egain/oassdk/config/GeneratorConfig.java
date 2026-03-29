@@ -31,6 +31,9 @@ public class GeneratorConfig {
 
     private boolean modelsOnly; // If true, only generate models and skip executor/resources.
 
+    // Observability configuration (OpenTelemetry + Micrometer)
+    private ObservabilityConfig observabilityConfig;
+
     /**
      * Default constructor
      */
@@ -47,6 +50,7 @@ public class GeneratorConfig {
         this.includeOperations = null;
         this.searchPaths = null;
         this.specZipPath = null;
+        this.observabilityConfig = new ObservabilityConfig();
     }
 
     /**
@@ -67,6 +71,7 @@ public class GeneratorConfig {
         this.includeOperations = null;
         this.searchPaths = null;
         this.specZipPath = null;
+        this.observabilityConfig = new ObservabilityConfig();
     }
 
     // Getters and Setters
@@ -193,6 +198,14 @@ public class GeneratorConfig {
         this.specZipPath = specZipPath;
     }
 
+    public ObservabilityConfig getObservabilityConfig() {
+        return observabilityConfig;
+    }
+
+    public void setObservabilityConfig(ObservabilityConfig observabilityConfig) {
+        this.observabilityConfig = observabilityConfig;
+    }
+
     /**
      * Builder class for GeneratorConfig
      */
@@ -210,6 +223,7 @@ public class GeneratorConfig {
         private List<String> searchPaths = null;
         private String specZipPath = null;
         private boolean modelsOnly = false;
+        private ObservabilityConfig observabilityConfig = new ObservabilityConfig();
 
         public Builder language(String language) {
             this.language = language;
@@ -283,6 +297,16 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder observabilityConfig(ObservabilityConfig observabilityConfig) {
+            this.observabilityConfig = observabilityConfig;
+            return this;
+        }
+
+        public Builder observabilityEnabled(boolean enabled) {
+            this.observabilityConfig.setEnabled(enabled);
+            return this;
+        }
+
         public GeneratorConfig build() {
             GeneratorConfig config = new GeneratorConfig(language, framework, packageName, version,
                     outputDir, templatesDir, customTemplates, additionalProperties);
@@ -291,6 +315,7 @@ public class GeneratorConfig {
             config.setSearchPaths(searchPaths);
             config.setSpecZipPath(specZipPath);
             config.setModelsOnly(modelsOnly);
+            config.setObservabilityConfig(observabilityConfig);
             return config;
         }
     }
@@ -320,6 +345,7 @@ public class GeneratorConfig {
                 ", searchPaths=" + searchPaths +
                 ", specZipPath=" + specZipPath +
                 ", modelsOnly=" + modelsOnly +
+                ", observabilityConfig=" + observabilityConfig +
                 '}';
     }
 }

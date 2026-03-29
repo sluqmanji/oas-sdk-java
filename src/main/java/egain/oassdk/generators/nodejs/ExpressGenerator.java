@@ -2,6 +2,7 @@ package egain.oassdk.generators.nodejs;
 
 import egain.oassdk.Util;
 import egain.oassdk.config.GeneratorConfig;
+import egain.oassdk.config.ObservabilityConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.core.logging.LoggerConfig;
 import egain.oassdk.generators.CodeGenerator;
@@ -42,8 +43,8 @@ public class ExpressGenerator implements CodeGenerator, ConfigurableGenerator {
             // Generate models
             generateModels(spec, outputDir, packageName);
 
-            // Generate middleware (including security)
-            generateMiddleware(outputDir, packageName);
+            // Generate middleware (including security and observability)
+            generateMiddleware(spec, outputDir, packageName);
 
             // Generate validators
             generateValidators(spec, outputDir, packageName);
@@ -586,7 +587,37 @@ public class ExpressGenerator implements CodeGenerator, ConfigurableGenerator {
      * Generate middleware
      */
     private void generateMiddleware(String outputDir, String packageName) throws IOException {
+        generateMiddleware(null, outputDir, packageName);
+    }
+
+    private void generateMiddleware(Map<String, Object> spec, String outputDir, String packageName) throws IOException {
         String basePath = outputDir + "/" + (packageName != null ? packageName.replace(".", "/") : "api");
+
+        // Determine service name for observability
+        String obsServiceName = "express-api";
+        if (spec != null) {
+            Map<String, Object> obsInfo = Util.asStringObjectMap(spec.get("info"));
+            if (obsInfo != null && obsInfo.get("title") != null) {
+                obsServiceName = toKebabCase((String) obsInfo.get("title"));
+            }
+        }
+
+        // Generate observability middleware
+        String observabilityContent = "// OpenTelemetry instrumentation - must be loaded before any other modules\n" +
+                "const { NodeSDK } = require('@opentelemetry/sdk-node');\n" +
+                "const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');\n" +
+                "\n" +
+                "const sdk = new NodeSDK({\n" +
+                "    serviceName: '" + obsServiceName + "',\n" +
+                "    instrumentations: [getNodeAutoInstrumentations()]\n" +
+                "});\n" +
+                "\n" +
+                "sdk.start();\n" +
+                "console.log('OpenTelemetry tracing initialized');\n" +
+                "\n" +
+                "module.exports = { sdk };\n";
+
+        writeFile(basePath + "/middleware/observability.js", observabilityContent);
 
         // Generate auth middleware
         String authContent = """
@@ -645,7 +676,15 @@ public class ExpressGenerator implements CodeGenerator, ConfigurableGenerator {
         // Extract server base path
         String serverBasePath = extractServerBasePath(spec);
 
+        // Determine service name from spec
+        Map<String, Object> appInfo = Util.asStringObjectMap(spec.get("info"));
+        String serviceName = appInfo != null && appInfo.get("title") != null
+                ? toKebabCase((String) appInfo.get("title"))
+                : "express-api";
+
         StringBuilder content = new StringBuilder();
+        content.append("// Initialize OpenTelemetry (must be first)\n");
+        content.append("require('./middleware/observability');\n\n");
         content.append("const express = require('express');\n");
         content.append("const cors = require('cors');\n");
         content.append("require('dotenv').config();\n\n");
@@ -654,6 +693,15 @@ public class ExpressGenerator implements CodeGenerator, ConfigurableGenerator {
         content.append("app.use(cors());\n");
         content.append("app.use(express.json());\n");
         content.append("app.use(express.urlencoded({ extended: true }));\n\n");
+        content.append("// Observability: Prometheus metrics\n");
+        content.append("const promBundle = require('express-prom-bundle');\n");
+        content.append("const metricsMiddleware = promBundle({\n");
+        content.append("    includeMethod: true,\n");
+        content.append("    includePath: true,\n");
+        content.append("    includeStatusCode: true,\n");
+        content.append("    promClient: { collectDefaultMetrics: {} }\n");
+        content.append("});\n");
+        content.append("app.use(metricsMiddleware);\n\n");
         content.append("// Routes\n");
 
         // Import and register routes
@@ -727,7 +775,12 @@ public class ExpressGenerator implements CodeGenerator, ConfigurableGenerator {
                 "    \"express-validator\": \"^7.0.1\",\n" +
                 "    \"cors\": \"^2.8.5\",\n" +
                 "    \"dotenv\": \"^16.0.3\",\n" +
-                "    \"jsonwebtoken\": \"^9.0.0\"\n" +
+                "    \"jsonwebtoken\": \"^9.0.0\",\n" +
+                "    \"@opentelemetry/sdk-node\": \"^0.48.0\",\n" +
+                "    \"@opentelemetry/auto-instrumentations-node\": \"^0.43.0\",\n" +
+                "    \"@opentelemetry/exporter-prometheus\": \"^0.48.0\",\n" +
+                "    \"express-prom-bundle\": \"^7.0.0\",\n" +
+                "    \"prom-client\": \"^15.1.0\"\n" +
                 "  },\n" +
                 "  \"devDependencies\": {\n" +
                 "    \"nodemon\": \"^2.0.22\",\n" +

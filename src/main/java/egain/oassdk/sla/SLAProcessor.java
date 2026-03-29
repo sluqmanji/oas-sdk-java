@@ -2,6 +2,7 @@ package egain.oassdk.sla;
 
 import egain.oassdk.Util;
 import egain.oassdk.config.SLAConfig;
+import egain.oassdk.core.Constants;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.core.logging.LoggerConfig;
 
@@ -10,6 +11,7 @@ import java.util.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -35,7 +37,7 @@ public class SLAProcessor {
             throw new GenerationException("Specification cannot be null");
         }
         if (outputDir == null) {
-            throw new IllegalArgumentException("Output directory cannot be null");
+            throw new GenerationException("Output directory cannot be null");
         }
         try {
             // Create output directory
@@ -73,7 +75,7 @@ public class SLAProcessor {
      */
     public void generateMonitoring(Map<String, Object> spec, String outputDir, SLAConfig config, List<String> monitoringStack) throws GenerationException {
         if (outputDir == null) {
-            throw new IllegalArgumentException("Output directory cannot be null");
+            throw new GenerationException("Output directory cannot be null");
         }
         try {
             // Create output directory
@@ -115,29 +117,60 @@ public class SLAProcessor {
     }
 
     /**
-     * Generate AWS API Gateway policy
+     * Generate AWS API Gateway policy restricted to actual API paths
      */
     private String generateAWSPolicy(Map<String, Object> spec, Map<String, Object> slaSpec) {
-        String apiTitle = getAPITitle(spec);
+        List<String> apiPaths = getAPIPaths(spec);
+
+        StringBuilder statements = new StringBuilder();
+        for (int i = 0; i < apiPaths.size(); i++) {
+            String path = apiPaths.get(i);
+            // Collect HTTP methods defined for this path
+            Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+            Map<String, Object> pathItem = paths != null ? Util.asStringObjectMap(paths.get(path)) : null;
+            List<String> methods = new ArrayList<>();
+            if (pathItem != null) {
+                for (String method : Constants.HTTP_METHODS) {
+                    if (pathItem.containsKey(method)) {
+                        methods.add(method.toUpperCase());
+                    }
+                }
+            }
+            if (methods.isEmpty()) {
+                methods.add("GET");
+            }
+            String methodPattern = String.join(",", methods);
+            // Convert OAS path params {id} to wildcard *
+            String arnPath = path.replaceAll("\\{[^}]+}", "*");
+            if (i > 0) {
+                statements.append(",\n");
+            }
+            statements.append(String.format("""
+                            {
+                                "Effect": "Allow",
+                                "Action": "execute-api:Invoke",
+                                "Resource": "arn:aws:execute-api:${region}:${account}:${apiId}/%s%s"
+                            }""", methodPattern.contains(",") ? "*/" : methods.get(0) + "/", arnPath));
+        }
+
+        // Fallback if no paths found
+        if (apiPaths.isEmpty()) {
+            statements.append("""
+                            {
+                                "Effect": "Allow",
+                                "Action": "execute-api:Invoke",
+                                "Resource": "arn:aws:execute-api:${region}:${account}:${apiId}/*/GET/*"
+                            }""");
+        }
 
         return String.format("""
                 {
                     "Version": "2012-10-17",
                     "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": "*",
-                            "Action": "execute-api:Invoke",
-                            "Resource": "arn:aws:execute-api:*:*:*/*/*",
-                            "Condition": {
-                                "StringEquals": {
-                                    "aws:SourceIp": "0.0.0.0/0"
-                                }
-                            }
-                        }
+                %s
                     ]
                 }
-                """, apiTitle);
+                """, statements);
     }
 
     /**
@@ -212,6 +245,10 @@ public class SLAProcessor {
         // Generate SLA configuration
         String slaConfig = generateSLAConfig(spec, slaSpec);
         Files.write(Paths.get(outputDir, "SLAConfig.java"), slaConfig.getBytes(StandardCharsets.UTF_8));
+
+        // Generate Correlation ID filter
+        String correlationIdFilter = generateCorrelationIdFilter();
+        Files.write(Paths.get(outputDir, "CorrelationIdFilter.java"), correlationIdFilter.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -220,7 +257,7 @@ public class SLAProcessor {
     private String generateJavaSLAValidator(Map<String, Object> spec, Map<String, Object> slaSpec) {
         return """
                 package com.example.sla;
-                
+
                 import jakarta.inject.Singleton;
                 import jakarta.ws.rs.container.ContainerRequestContext;
                 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -229,20 +266,39 @@ public class SLAProcessor {
                 import java.io.IOException;
                 import java.util.concurrent.ConcurrentHashMap;
                 import java.util.concurrent.atomic.AtomicLong;
-                
+                import java.util.concurrent.atomic.AtomicReference;
+
                 @Provider
                 @Singleton
                 public class SLAValidator implements ContainerRequestFilter {
-                
-                    private final ConcurrentHashMap<String, AtomicLong> requestCounts = new ConcurrentHashMap<>();
-                    private final ConcurrentHashMap<String, Long> lastResetTime = new ConcurrentHashMap<>();
-                
+
+                    private static final long WINDOW_MS = 60_000L;
+                    private static final long MAX_REQUESTS_PER_WINDOW = 1000L;
+
+                    /**
+                     * Sliding window state holding the window start time and
+                     * the request count within that window. Immutable so it can
+                     * be swapped atomically via AtomicReference.
+                     */
+                    private static final class WindowState {
+                        final long windowStart;
+                        final long count;
+
+                        WindowState(long windowStart, long count) {
+                            this.windowStart = windowStart;
+                            this.count = count;
+                        }
+                    }
+
+                    private final ConcurrentHashMap<String, AtomicReference<WindowState>> windows =
+                            new ConcurrentHashMap<>();
+
                     @Override
                     public void filter(ContainerRequestContext requestContext) throws IOException {
                         String endpoint = requestContext.getUriInfo().getPath();
                         String method = requestContext.getMethod();
                         String key = method + ":" + endpoint;
-                
+
                         // Check rate limiting
                         if (!checkRateLimit(key)) {
                             requestContext.abortWith(
@@ -252,7 +308,7 @@ public class SLAProcessor {
                             );
                             return;
                         }
-                
+
                         // Check SLA requirements
                         if (!checkSLARequirements(requestContext)) {
                             requestContext.abortWith(
@@ -262,24 +318,30 @@ public class SLAProcessor {
                             );
                         }
                     }
-                
+
                     private boolean checkRateLimit(String key) {
-                        // Implement rate limiting logic based on SLA requirements
-                        AtomicLong count = requestCounts.computeIfAbsent(key, k -> new AtomicLong(0));
-                        long currentCount = count.incrementAndGet();
-                
-                        // Reset counter every minute
                         long now = System.currentTimeMillis();
-                        lastResetTime.putIfAbsent(key, now);
-                        if (now - lastResetTime.get(key) > 60000) {
-                            count.set(0);
-                            lastResetTime.put(key, now);
+                        AtomicReference<WindowState> ref = windows.computeIfAbsent(key,
+                                k -> new AtomicReference<>(new WindowState(now, 0L)));
+
+                        // CAS loop: atomically increment count or reset window
+                        while (true) {
+                            WindowState current = ref.get();
+                            WindowState next;
+                            if (now - current.windowStart >= WINDOW_MS) {
+                                // Window expired -- start a new window with count = 1
+                                next = new WindowState(now, 1L);
+                            } else {
+                                // Same window -- increment count
+                                next = new WindowState(current.windowStart, current.count + 1);
+                            }
+                            if (ref.compareAndSet(current, next)) {
+                                return next.count <= MAX_REQUESTS_PER_WINDOW;
+                            }
+                            // CAS failed, another thread updated; retry
                         }
-                
-                        // Allow up to 1000 requests per minute
-                        return currentCount <= 1000;
                     }
-                
+
                     private boolean checkSLARequirements(ContainerRequestContext requestContext) {
                         // Implement SLA validation logic
                         // Check response time, availability, etc.
@@ -295,19 +357,62 @@ public class SLAProcessor {
     private String generateSLAMonitoringController(Map<String, Object> spec, Map<String, Object> slaSpec) {
         return """
                 package com.example.sla;
-                
+
                 import jakarta.ws.rs.*;
                 import jakarta.ws.rs.core.MediaType;
                 import jakarta.ws.rs.core.Response;
                 import jakarta.inject.Singleton;
                 import java.util.HashMap;
                 import java.util.Map;
-                
+                import java.util.concurrent.ConcurrentHashMap;
+                import java.util.concurrent.atomic.AtomicLong;
+
                 @Path("/sla")
                 @Produces(MediaType.APPLICATION_JSON)
                 @Singleton
                 public class SLAMonitoringController {
-                
+
+                    private final long startTimeMillis = System.currentTimeMillis();
+
+                    // Real counters for instrumentation
+                    private final AtomicLong totalRequests = new AtomicLong(0);
+                    private final AtomicLong errorCount = new AtomicLong(0);
+                    private final AtomicLong totalResponseTimeNanos = new AtomicLong(0);
+
+                    // Per-endpoint tracking
+                    private final ConcurrentHashMap<String, AtomicLong> endpointRequests =
+                            new ConcurrentHashMap<>();
+                    private final ConcurrentHashMap<String, AtomicLong> endpointResponseTimeNanos =
+                            new ConcurrentHashMap<>();
+
+                    /**
+                     * Record a completed request for metrics tracking.
+                     *
+                     * @param responseTimeMs response time in milliseconds
+                     * @param isError        true if the response was an error (4xx/5xx)
+                     */
+                    public void recordRequest(long responseTimeMs, boolean isError) {
+                        totalRequests.incrementAndGet();
+                        totalResponseTimeNanos.addAndGet(responseTimeMs * 1_000_000L);
+                        if (isError) {
+                            errorCount.incrementAndGet();
+                        }
+                    }
+
+                    /**
+                     * Record a completed request with endpoint detail.
+                     *
+                     * @param endpoint       the request path
+                     * @param responseTimeMs response time in milliseconds
+                     * @param isError        true if the response was an error
+                     */
+                    public void recordRequest(String endpoint, long responseTimeMs, boolean isError) {
+                        recordRequest(responseTimeMs, isError);
+                        endpointRequests.computeIfAbsent(endpoint, k -> new AtomicLong(0)).incrementAndGet();
+                        endpointResponseTimeNanos.computeIfAbsent(endpoint, k -> new AtomicLong(0))
+                                .addAndGet(responseTimeMs * 1_000_000L);
+                    }
+
                     @GET
                     @Path("/status")
                     public Response getSLAStatus() {
@@ -317,10 +422,11 @@ public class SLAProcessor {
                         status.put("uptime", getUptime());
                         status.put("responseTime", getAverageResponseTime());
                         status.put("errorRate", getErrorRate());
-                
+                        status.put("totalRequests", totalRequests.get());
+
                         return Response.ok(status).build();
                     }
-                
+
                     @GET
                     @Path("/metrics")
                     public Response getMetrics() {
@@ -329,38 +435,47 @@ public class SLAProcessor {
                         metrics.put("averageResponseTime", getAverageResponseTime());
                         metrics.put("errorRate", getErrorRate());
                         metrics.put("availability", getAvailability());
-                
+                        metrics.put("totalRequests", totalRequests.get());
+                        metrics.put("totalErrors", errorCount.get());
+                        metrics.put("endpointRequests", new HashMap<>(endpointRequests));
+
                         return Response.ok(metrics).build();
                     }
-                
+
                     private long getUptime() {
-                        // Implement uptime calculation
-                        return System.currentTimeMillis() - getStartTime();
+                        return System.currentTimeMillis() - startTimeMillis;
                     }
-                
+
                     private double getAverageResponseTime() {
-                        // Implement response time calculation
-                        return 150.0; // milliseconds
+                        long count = totalRequests.get();
+                        if (count == 0) {
+                            return 0.0;
+                        }
+                        return (totalResponseTimeNanos.get() / 1_000_000.0) / count;
                     }
-                
+
                     private double getErrorRate() {
-                        // Implement error rate calculation
-                        return 0.01; // 1%
+                        long count = totalRequests.get();
+                        if (count == 0) {
+                            return 0.0;
+                        }
+                        return (double) errorCount.get() / count;
                     }
-                
+
                     private double getRequestsPerSecond() {
-                        // Implement RPS calculation
-                        return 10.0;
+                        long uptimeSeconds = getUptime() / 1000;
+                        if (uptimeSeconds == 0) {
+                            return 0.0;
+                        }
+                        return (double) totalRequests.get() / uptimeSeconds;
                     }
-                
+
                     private double getAvailability() {
-                        // Implement availability calculation
-                        return 99.9; // 99.9%
-                    }
-                
-                    private long getStartTime() {
-                        // Return application start time
-                        return System.currentTimeMillis() - 3600000; // 1 hour ago
+                        long count = totalRequests.get();
+                        if (count == 0) {
+                            return 100.0;
+                        }
+                        return (1.0 - (double) errorCount.get() / count) * 100.0;
                     }
                 }
                 """;
@@ -370,53 +485,81 @@ public class SLAProcessor {
      * Generate SLA configuration
      */
     private String generateSLAConfig(Map<String, Object> spec, Map<String, Object> slaSpec) {
-        return """
+        // Derive thresholds from x-sla extensions if present, otherwise use defaults
+        int responseTimeMs = 2000;
+        int rateLimit = 1000;
+        double errorRate = 0.01;
+        double availability = 99.9;
+
+        if (spec != null) {
+            Map<String, Object> info = Util.asStringObjectMap(spec.get("info"));
+            if (info != null) {
+                Object rtVal = info.get("x-sla-response-time");
+                if (rtVal instanceof Number) {
+                    responseTimeMs = ((Number) rtVal).intValue();
+                }
+                Object rlVal = info.get("x-sla-rate-limit");
+                if (rlVal instanceof Number) {
+                    rateLimit = ((Number) rlVal).intValue();
+                }
+                Object erVal = info.get("x-sla-error-rate");
+                if (erVal instanceof Number) {
+                    errorRate = ((Number) erVal).doubleValue();
+                }
+                Object avVal = info.get("x-sla-availability");
+                if (avVal instanceof Number) {
+                    availability = ((Number) avVal).doubleValue();
+                }
+            }
+        }
+
+        return String.format("""
                 package com.example.sla;
-                
+
                 import jakarta.inject.Singleton;
-                
+
                 @Singleton
                 public class SLAConfig {
-                
-                    private int maxRequestsPerMinute = 1000;
-                    private int maxResponseTimeMs = 2000;
-                    private double maxErrorRate = 0.01;
-                    private double minAvailability = 99.9;
-                
+
+                    private int maxRequestsPerMinute = %d;
+                    private int maxResponseTimeMs = %d;
+                    private double maxErrorRate = %s;
+                    private double minAvailability = %s;
+
                     // Getters and setters
                     public int getMaxRequestsPerMinute() {
                         return maxRequestsPerMinute;
                     }
-                
+
                     public void setMaxRequestsPerMinute(int maxRequestsPerMinute) {
                         this.maxRequestsPerMinute = maxRequestsPerMinute;
                     }
-                
+
                     public int getMaxResponseTimeMs() {
                         return maxResponseTimeMs;
                     }
-                
+
                     public void setMaxResponseTimeMs(int maxResponseTimeMs) {
                         this.maxResponseTimeMs = maxResponseTimeMs;
                     }
-                
+
                     public double getMaxErrorRate() {
                         return maxErrorRate;
                     }
-                
+
                     public void setMaxErrorRate(double maxErrorRate) {
                         this.maxErrorRate = maxErrorRate;
                     }
-                
+
                     public double getMinAvailability() {
                         return minAvailability;
                     }
-                
+
                     public void setMinAvailability(double minAvailability) {
                         this.minAvailability = minAvailability;
                     }
                 }
-                """;
+                """, rateLimit, responseTimeMs, errorRate, availability);
     }
 
     /**
@@ -444,7 +587,7 @@ public class SLAProcessor {
                   - job_name: 'api-service'
                     static_configs:
                       - targets: ['api-service:8080']
-                    metrics_path: '/actuator/prometheus'
+                    metrics_path: '/metrics'
                     scrape_interval: 5s
                 """;
     }
@@ -459,11 +602,29 @@ public class SLAProcessor {
                     "title": "API SLA Dashboard",
                     "panels": [
                       {
-                        "title": "Response Time",
+                        "title": "Response Time (p95)",
                         "type": "graph",
                         "targets": [
                           {
-                            "expr": "histogram_quantile(0.95, http_request_duration_seconds_bucket)"
+                            "expr": "histogram_quantile(0.95, rate(http_server_requests_seconds_bucket[5m]))"
+                          }
+                        ]
+                      },
+                      {
+                        "title": "Response Time Percentiles (p50 / p75 / p99)",
+                        "type": "graph",
+                        "targets": [
+                          {
+                            "expr": "histogram_quantile(0.50, rate(http_server_requests_seconds_bucket[5m]))",
+                            "legendFormat": "p50"
+                          },
+                          {
+                            "expr": "histogram_quantile(0.75, rate(http_server_requests_seconds_bucket[5m]))",
+                            "legendFormat": "p75"
+                          },
+                          {
+                            "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[5m]))",
+                            "legendFormat": "p99"
                           }
                         ]
                       },
@@ -472,7 +633,17 @@ public class SLAProcessor {
                         "type": "graph",
                         "targets": [
                           {
-                            "expr": "rate(http_requests_total[5m])"
+                            "expr": "rate(http_server_requests_seconds_count[5m])"
+                          }
+                        ]
+                      },
+                      {
+                        "title": "Per-Endpoint Request Rate",
+                        "type": "graph",
+                        "targets": [
+                          {
+                            "expr": "sum by (uri) (rate(http_server_requests_seconds_count[5m]))",
+                            "legendFormat": "{{uri}}"
                           }
                         ]
                       },
@@ -481,9 +652,53 @@ public class SLAProcessor {
                         "type": "graph",
                         "targets": [
                           {
-                            "expr": "rate(http_requests_total{status=~"5.."}[5m])"
+                            "expr": "rate(http_server_requests_seconds_count{status=~\\"5..\\"}[5m])"
                           }
                         ]
+                      },
+                      {
+                        "title": "SLA Compliance",
+                        "type": "gauge",
+                        "targets": [
+                          {
+                            "expr": "(1 - (sum(rate(http_server_requests_seconds_count{status=~\\"5..\\"}[5m])) / sum(rate(http_server_requests_seconds_count[5m])))) * 100"
+                          }
+                        ],
+                        "fieldConfig": {
+                          "defaults": {
+                            "min": 0,
+                            "max": 100,
+                            "thresholds": {
+                              "steps": [
+                                { "value": 0, "color": "red" },
+                                { "value": 95, "color": "yellow" },
+                                { "value": 99, "color": "green" }
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "title": "Availability (%)",
+                        "type": "gauge",
+                        "targets": [
+                          {
+                            "expr": "(sum(rate(http_server_requests_seconds_count{status!~\\"5..\\"}[24h])) / sum(rate(http_server_requests_seconds_count[24h]))) * 100"
+                          }
+                        ],
+                        "fieldConfig": {
+                          "defaults": {
+                            "min": 0,
+                            "max": 100,
+                            "thresholds": {
+                              "steps": [
+                                { "value": 0, "color": "red" },
+                                { "value": 99, "color": "yellow" },
+                                { "value": 99.9, "color": "green" }
+                              ]
+                            }
+                          }
+                        }
                       }
                     ]
                   }
@@ -593,7 +808,7 @@ public class SLAProcessor {
      */
     private String generateDockerfile(Map<String, Object> spec, Map<String, Object> slaSpec) {
         return """
-                FROM openjdk:11-jre-slim
+                FROM eclipse-temurin:21-jre
                 
                 WORKDIR /app
                 
@@ -602,7 +817,7 @@ public class SLAProcessor {
                 EXPOSE 8080
                 
                 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\
-                  CMD curl -f http://localhost:8080/actuator/health || exit 1
+                  CMD curl -f http://localhost:8080/sla/status || exit 1
                 
                 ENTRYPOINT ["java", "-jar", "app.jar"]
                 """;
@@ -623,7 +838,7 @@ public class SLAProcessor {
                     environment:
                       - JAVA_OPTS=-Xmx512m
                     healthcheck:
-                      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+                      test: ["CMD", "curl", "-f", "http://localhost:8080/sla/status"]
                       interval: 30s
                       timeout: 10s
                       retries: 3
@@ -722,6 +937,56 @@ public class SLAProcessor {
     }
 
     /**
+     * Generate CorrelationIdFilter for trace-id propagation
+     */
+    private String generateCorrelationIdFilter() {
+        return """
+                package com.example.sla;
+
+                import jakarta.inject.Singleton;
+                import jakarta.ws.rs.container.ContainerRequestContext;
+                import jakarta.ws.rs.container.ContainerRequestFilter;
+                import jakarta.ws.rs.container.ContainerResponseContext;
+                import jakarta.ws.rs.container.ContainerResponseFilter;
+                import jakarta.ws.rs.ext.Provider;
+                import java.io.IOException;
+                import java.util.UUID;
+
+                /**
+                 * JAX-RS filter that extracts or generates a correlation / trace ID
+                 * and propagates it on the response so callers can correlate
+                 * requests across services.
+                 */
+                @Provider
+                @Singleton
+                public class CorrelationIdFilter implements ContainerRequestFilter, ContainerResponseFilter {
+
+                    private static final String TRACE_ID_HEADER = "X-Trace-Id";
+                    private static final String PROPERTY_KEY = "sla.traceId";
+
+                    @Override
+                    public void filter(ContainerRequestContext requestContext) throws IOException {
+                        String traceId = requestContext.getHeaderString(TRACE_ID_HEADER);
+                        if (traceId == null || traceId.isBlank()) {
+                            traceId = UUID.randomUUID().toString();
+                        }
+                        // Store on the request so the response filter can retrieve it
+                        requestContext.setProperty(PROPERTY_KEY, traceId);
+                    }
+
+                    @Override
+                    public void filter(ContainerRequestContext requestContext,
+                                       ContainerResponseContext responseContext) throws IOException {
+                        Object traceId = requestContext.getProperty(PROPERTY_KEY);
+                        if (traceId != null) {
+                            responseContext.getHeaders().putSingle(TRACE_ID_HEADER, traceId.toString());
+                        }
+                    }
+                }
+                """;
+    }
+
+    /**
      * Helper methods
      */
     private String getAPITitle(Map<String, Object> spec) {
@@ -729,5 +994,19 @@ public class SLAProcessor {
         if (spec != null)
             info = Util.asStringObjectMap(spec.get("info"));
         return info != null ? (String) info.get("title") : "API";
+    }
+
+    /**
+     * Extract all API paths defined in the OpenAPI spec.
+     */
+    private List<String> getAPIPaths(Map<String, Object> spec) {
+        List<String> paths = new ArrayList<>();
+        if (spec != null) {
+            Map<String, Object> pathsMap = Util.asStringObjectMap(spec.get("paths"));
+            if (pathsMap != null) {
+                paths.addAll(pathsMap.keySet());
+            }
+        }
+        return paths;
     }
 }

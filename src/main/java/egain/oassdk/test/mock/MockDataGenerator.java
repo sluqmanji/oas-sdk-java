@@ -9,8 +9,12 @@ import java.nio.file.Paths;
 import java.util.Map;
 
 /**
- * Generates mock data using OpenAPI specification
+ * Generates mock data using OpenAPI specification.
+ *
+ * @deprecated Use {@link egain.oassdk.testgenerators.mock.MockDataGenerator} instead.
+ *             This class is retained for backward compatibility with {@link egain.oassdk.test.TestSDK}.
  */
+@Deprecated
 public class MockDataGenerator {
 
     /**

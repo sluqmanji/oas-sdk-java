@@ -1,6 +1,7 @@
 package egain.oassdk.test.postman;
 
 import egain.oassdk.Util;
+import egain.oassdk.core.Constants;
 import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
@@ -14,8 +15,12 @@ import java.nio.file.Paths;
 import java.util.*;
 
 /**
- * Generates Postman test scripts for each API
+ * Generates Postman test scripts for each API.
+ *
+ * @deprecated Use {@link egain.oassdk.testgenerators.postman.PostmanTestGenerator} instead.
+ *             This class is retained for backward compatibility with {@link egain.oassdk.test.TestSDK}.
  */
+@Deprecated
 public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGenerator {
 
     private TestConfig config;
@@ -153,7 +158,7 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
     private Map<String, List<Map<String, Object>>> groupOperationsByTag(Map<String, Object> pathItem, String path) {
         Map<String, List<Map<String, Object>>> taggedOperations = new HashMap<>();
 
-        String[] methods = {"get", "post", "put", "delete", "patch", "head", "options", "trace"};
+        String[] methods = Constants.HTTP_METHODS;
         for (String method : methods) {
             if (pathItem.containsKey(method)) {
                 Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
