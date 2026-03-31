@@ -404,7 +404,7 @@ public class OASParser {
                         if (origDescription != null) {
                             map.put("description", origDescription);
                         }
-                        // For primitive schemas (string, integer, array of primitives, etc.), do not set x-resolved-ref
+                        // For inline-only schemas (string, number, array of primitives, array of objects, etc.), do not set x-resolved-ref
                         // or register in main spec so generators treat the property as inline (e.g. String with enum).
                         if (!isPrimitiveSchema(map)) {
                             // Preserve original ref path for internal refs so generators (e.g. XSD) can emit imports/type refs
@@ -514,8 +514,10 @@ public class OASParser {
     }
 
     /**
-     * Returns true if the schema is a primitive type (string, integer, number, boolean, or array of primitives).
-     * Such schemas should be inlined at reference sites and not registered as separate model classes.
+     * Returns true if the schema should be fully inlined at reference sites (no named component): JSON primitives
+     * (string, integer, number, boolean), enum-only schemas, arrays whose {@code items} are primitives or inline
+     * objects ({@code type: object} or implicit object via {@code properties}), and similar shapes. Such schemas
+     * are not registered as separate model classes in {@code components/schemas}.
      */
     private static boolean isPrimitiveSchema(Map<String, Object> schema) {
         if (schema == null || schema.isEmpty()) {
@@ -541,10 +543,18 @@ public class OASParser {
             if (items instanceof Map) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> itemsMap = (Map<String, Object>) items;
-                if (itemsMap.containsKey("properties")) {
+                // Unresolved items: $ref only (or ref + title/description). Keep registration until fully inlined.
+                if (itemsMap.containsKey("$ref") && (itemsMap.size() == 1 || isRefWithOnlyDocKeys(itemsMap))) {
                     return false;
                 }
                 Object itemsType = itemsMap.get("type");
+                if (itemsType != null && "object".equals(itemsType.toString())) {
+                    return true;
+                }
+                if (itemsType == null && itemsMap.containsKey("properties")) {
+                    // Implicit object items (OpenAPI object default when properties are present)
+                    return true;
+                }
                 if (itemsType != null) {
                     String itemsTypeStr = itemsType.toString();
                     return "string".equals(itemsTypeStr) || "integer".equals(itemsTypeStr)
@@ -1042,7 +1052,7 @@ public class OASParser {
             if (!mergeAll) {
                 return;
             }
-            // Skip primitive-only schemas (string, integer, array of primitives) so they are inlined, not registered (PR #44).
+            // Skip inline-only schemas (primitives, array of primitives, array of inline objects, etc.) so they are not registered (PR #44).
             if (isPrimitiveSchema(externalSpec)) {
                 return;
             }
@@ -1107,7 +1117,7 @@ public class OASParser {
         String fileDerivedSchemaName = (fileKey != null && !fileKey.isEmpty()) ? deriveSchemaNameFromRef(fileKey) : null;
 
         // Merge external schemas into main schemas. When mergeAll is false, only merge schemas whose path was referenced.
-        // Skip primitive schemas (string, integer, etc.) so they are not registered as model classes.
+        // Skip inline-only schemas (primitives, arrays of primitives/objects, etc.) so they are not registered as model classes.
         for (Map.Entry<String, Object> schemaEntry : externalSchemas.entrySet()) {
             String schemaName = schemaEntry.getKey();
             if (!mergeAll && (referencedFragments == null || !isSchemaPathReferenced(referencedFragments, schemaName))) {

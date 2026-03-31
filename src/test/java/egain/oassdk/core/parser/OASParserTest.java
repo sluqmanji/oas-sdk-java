@@ -415,6 +415,25 @@ public class OASParserTest {
             """;
         Files.writeString(modelsDir.resolve("StringListRef.yaml"), arrayOfStringsYaml);
 
+        String arrayOfObjectsYaml = """
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+            """;
+        Files.writeString(modelsDir.resolve("ObjectListRef.yaml"), arrayOfObjectsYaml);
+
+        String arrayOfImplicitObjectsYaml = """
+            type: array
+            items:
+              properties:
+                code:
+                  type: integer
+            """;
+        Files.writeString(modelsDir.resolve("ImplicitObjectListRef.yaml"), arrayOfImplicitObjectsYaml);
+
         String wrapperYaml = """
             type: object
             title: Wrapper
@@ -423,6 +442,10 @@ public class OASParserTest {
                 $ref: "./StringRef.yaml"
               tags:
                 $ref: "./StringListRef.yaml"
+              rows:
+                $ref: "./ObjectListRef.yaml"
+              rowsImplicit:
+                $ref: "./ImplicitObjectListRef.yaml"
             """;
         Files.writeString(modelsDir.resolve("Wrapper.yaml"), wrapperYaml);
 
@@ -453,6 +476,10 @@ public class OASParserTest {
             "Primitive schema StringRef (type: string) must not be registered when inlined");
         assertFalse(schemas.containsKey("StringListRef"),
             "Primitive schema StringListRef (array of strings) must not be registered when inlined");
+        assertFalse(schemas.containsKey("ObjectListRef"),
+            "Inline array-of-objects schema ObjectListRef must not be registered when inlined");
+        assertFalse(schemas.containsKey("ImplicitObjectListRef"),
+            "Inline array with implicit object items must not register ImplicitObjectListRef when inlined");
     }
 }
 
