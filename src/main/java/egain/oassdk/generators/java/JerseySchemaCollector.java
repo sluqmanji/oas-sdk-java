@@ -595,6 +595,24 @@ class JerseySchemaCollector {
             return;
         }
 
+        // If this map is exactly a top-level components/schemas definition, register its name.
+        // Must run before the visited short-circuit: the same instance may be reached first from
+        // iterating all schemas (no x-resolved-ref on the root object) and later from property/item
+        // traversal; a second visit hits visited and would otherwise skip x-resolved-ref handling.
+        // Util.asStringObjectMap copies break identity checks later in this method.
+        Map<String, Object> compsForReg = Util.asStringObjectMap(spec.get("components"));
+        if (compsForReg != null) {
+            Map<String, Object> schemasForReg = Util.asStringObjectMap(compsForReg.get("schemas"));
+            if (schemasForReg != null) {
+                for (Map.Entry<String, Object> e : schemasForReg.entrySet()) {
+                    if (e.getValue() == schemaObj) {
+                        referencedSchemas.add(e.getKey());
+                        break;
+                    }
+                }
+            }
+        }
+
         // Cycle detection
         if (visited.containsKey(schemaObj)) {
             return;
@@ -702,7 +720,7 @@ class JerseySchemaCollector {
                 Map<String, Object> schemasMap = Util.asStringObjectMap(componentsForIdentity.get("schemas"));
                 if (schemasMap != null) {
                     for (Map.Entry<String, Object> schemaEntry : schemasMap.entrySet()) {
-                        if (schemaEntry.getValue() == schema) {
+                        if (schemaEntry.getValue() == schemaObj) {
                             String schemaName = schemaEntry.getKey();
                             if (!referencedSchemas.contains(schemaName)) {
                                 referencedSchemas.add(schemaName);
@@ -733,8 +751,7 @@ class JerseySchemaCollector {
                 Map<String, Object> schemas = Util.asStringObjectMap(components.get("schemas"));
                 if (schemas != null) {
                     for (Map.Entry<String, Object> schemaEntry : schemas.entrySet()) {
-                        Map<String, Object> candidateSchema = Util.asStringObjectMap(schemaEntry.getValue());
-                        if (candidateSchema == schema) {
+                        if (schemaEntry.getValue() == schemaObj) {
                             String schemaName = schemaEntry.getKey();
                             if (!referencedSchemas.contains(schemaName)) {
                                 referencedSchemas.add(schemaName);

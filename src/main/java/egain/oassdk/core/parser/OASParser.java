@@ -671,9 +671,11 @@ public class OASParser {
     private static final int COLLECT_SCHEMA_REFS_MAX_DEPTH = 100;
 
     /**
-     * Collect all JSON paths of $ref that point to #/components/schemas/... from the given object (transitively).
+     * Collect all JSON paths of $ref (and {@code x-resolved-ref} from the resolver) that point to
+     * #/components/schemas/... from the given object (transitively).
      * Used so that when we reference a fragment (e.g. requestBodies/X), we also record schema refs used inside it
-     * and merge those schemas into the main spec before resolution continues.
+     * and merge those schemas into the main spec before resolution continues. After in-place $ref resolution,
+     * {@code $ref} may be gone but {@code x-resolved-ref} still names the original component.
      *
      * @param obj      root object to traverse (Map, List, or other)
      * @param outPaths set to add paths to (e.g. "/components/schemas/UserEditRequest"); paths use leading slash
@@ -700,6 +702,12 @@ public class OASParser {
                     String path = ref.startsWith("#/") ? "/" + ref.substring(2) : (ref.startsWith("/") ? ref : "/" + ref);
                     outPaths.add(path);
                 }
+            }
+            String xResolved = (String) map.get("x-resolved-ref");
+            if (xResolved != null && xResolved.startsWith("#/components/schemas/")) {
+                String path = xResolved.startsWith("#/") ? "/" + xResolved.substring(2)
+                        : (xResolved.startsWith("/") ? xResolved : "/" + xResolved);
+                outPaths.add(path);
             }
             for (Object value : map.values()) {
                 collectSchemaRefPaths(value, outPaths, visited, depth + 1);
