@@ -9,7 +9,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -990,5 +994,99 @@ public class JerseyGeneratorArrayTypesAndSetTest {
             "Executor base class should be GetBOExecutor_2<List<TagCategory>> for inlined object-with-single-array schema");
         assertTrue(content.contains("private List<TagCategory> mResponseData") || content.contains("List<TagCategory> mResponseData"),
             "Executor should declare mResponseData as List<TagCategory>");
+    }
+
+    /**
+     * Regression: Folder-like model references List&lt;FolderPermissionsEntry&gt; but the entry schema
+     * was missing from generated models when {@code components/schemas} iteration visited the entry
+     * map before the parent (same map instance later short-circuited on {@code visited}).
+     */
+    @Test
+    @DisplayName("collectAllReferencedSchemaNames includes array item object when entry schema is visited first")
+    public void testReferencedSchemasIncludeArrayItemObjectWhenEntryVisitedFirst() {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("type", "object");
+        Map<String, Object> dp = new LinkedHashMap<>();
+        dp.put("n", Map.of("type", "string"));
+        detail.put("properties", dp);
+
+        Map<String, Object> permItems = new LinkedHashMap<>();
+        permItems.put("$ref", "#/components/schemas/PermissionDetail");
+
+        Map<String, Object> entryProps = new LinkedHashMap<>();
+        Map<String, Object> permField = new LinkedHashMap<>();
+        permField.put("type", "array");
+        permField.put("items", permItems);
+        entryProps.put("permission", permField);
+
+        Map<String, Object> folderPermissionsEntry = new LinkedHashMap<>();
+        folderPermissionsEntry.put("type", "object");
+        folderPermissionsEntry.put("properties", entryProps);
+
+        Map<String, Object> arrItems = new LinkedHashMap<>();
+        arrItems.put("$ref", "#/components/schemas/FolderPermissionsEntry");
+
+        Map<String, Object> folderPermissions = new LinkedHashMap<>();
+        folderPermissions.put("type", "array");
+        folderPermissions.put("items", arrItems);
+
+        List<Object> allOf = new ArrayList<>();
+        allOf.add(Map.of("description", "folder perms"));
+        Map<String, Object> refBranch = new LinkedHashMap<>();
+        refBranch.put("$ref", "#/components/schemas/FolderPermissions");
+        allOf.add(refBranch);
+        Map<String, Object> permProp = new LinkedHashMap<>();
+        permProp.put("allOf", allOf);
+
+        Map<String, Object> folderProps = new LinkedHashMap<>();
+        folderProps.put("permissions", permProp);
+
+        Map<String, Object> folder = new LinkedHashMap<>();
+        folder.put("type", "object");
+        folder.put("properties", folderProps);
+
+        // LinkedHashMap order: entry + array schemas before Folder — reproduces visit-order bug without fix
+        Map<String, Object> schemas = new LinkedHashMap<>();
+        schemas.put("FolderPermissionsEntry", folderPermissionsEntry);
+        schemas.put("FolderPermissions", folderPermissions);
+        schemas.put("PermissionDetail", detail);
+        schemas.put("Folder", folder);
+
+        Map<String, Object> components = new LinkedHashMap<>();
+        components.put("schemas", schemas);
+
+        Map<String, Object> mediaSchema = new LinkedHashMap<>();
+        mediaSchema.put("$ref", "#/components/schemas/Folder");
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("schema", mediaSchema);
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("application/json", json);
+        Map<String, Object> response200 = new LinkedHashMap<>();
+        response200.put("content", content);
+
+        Map<String, Object> responses = new LinkedHashMap<>();
+        responses.put("200", response200);
+        Map<String, Object> getOp = new LinkedHashMap<>();
+        getOp.put("operationId", "getFolder");
+        getOp.put("responses", responses);
+
+        Map<String, Object> pathItem = new LinkedHashMap<>();
+        pathItem.put("get", getOp);
+        Map<String, Object> paths = new LinkedHashMap<>();
+        paths.put("/f", pathItem);
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("info", Map.of("title", "t", "version", "1"));
+        spec.put("paths", paths);
+        spec.put("components", components);
+
+        JerseyGenerationContext ctx = new JerseyGenerationContext(spec, "", null, "com.test");
+        JerseySchemaCollector collector = new JerseySchemaCollector(ctx);
+        Set<String> referenced = collector.collectAllReferencedSchemaNames(spec);
+
+        assertTrue(referenced.contains("Folder"), "Parent Folder should be referenced");
+        assertTrue(referenced.contains("FolderPermissionsEntry"),
+            "Array item schema FolderPermissionsEntry must be referenced when traversed before parent");
     }
 }
