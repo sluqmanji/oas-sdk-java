@@ -22,4 +22,4 @@ logs/
 *.log
 dependency-reduced-pom.xml
 /generated
-/.claude
+.claude/settings.local.json
