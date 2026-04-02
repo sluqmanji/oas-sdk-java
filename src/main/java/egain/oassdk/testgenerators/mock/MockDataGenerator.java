@@ -432,7 +432,19 @@ public class MockDataGenerator implements TestGenerator, ConfigurableTestGenerat
             }
         }
 
-        return ThreadLocalRandom.current().nextInt(min, max + 1);
+        if (max < min) {
+            int t = min;
+            min = max;
+            max = t;
+        }
+        if (min == max) {
+            return min;
+        }
+        long range = (long) max - min + 1L;
+        if (range <= 0 || range > Integer.MAX_VALUE) {
+            return min;
+        }
+        return min + ThreadLocalRandom.current().nextInt((int) range);
     }
 
     /**

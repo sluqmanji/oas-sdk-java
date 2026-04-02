@@ -5,6 +5,7 @@ import egain.oassdk.core.Constants;
 import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
+import egain.oassdk.testgenerators.IntegrationScenarioSupport;
 import egain.oassdk.testgenerators.TestGenerator;
 
 import java.io.IOException;
@@ -122,6 +123,7 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         // Imports
         sb.append("import pytest\n");
         sb.append("import requests\n");
+        sb.append("import json\n");
         sb.append("from typing import Dict, Any, Optional\n");
         sb.append("import os\n\n");
 
@@ -146,8 +148,28 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         sb.append("    return result\n\n\n");
 
         sb.append("def get_auth_token() -> Optional[str]:\n");
-        sb.append("    \"\"\"Get authentication token from environment\"\"\"\n");
-        sb.append("    return os.getenv('API_TOKEN')\n\n\n");
+        sb.append("    \"\"\"Legacy token (API_BEARER_TOKEN or API_TOKEN)\"\"\"\n");
+        sb.append("    t = os.getenv('API_BEARER_TOKEN')\n");
+        sb.append("    if not t:\n");
+        sb.append("        t = os.getenv('API_TOKEN')\n");
+        sb.append("    return t\n\n\n");
+        sb.append("def get_token_client_application() -> Optional[str]:\n");
+        sb.append("    t = os.getenv('INTEGRATION_TOKEN_CLIENT_APPLICATION')\n");
+        sb.append("    if not t:\n");
+        sb.append("        t = os.getenv('API_BEARER_TOKEN')\n");
+        sb.append("    if not t:\n");
+        sb.append("        t = os.getenv('API_TOKEN')\n");
+        sb.append("    return t\n\n\n");
+        sb.append("def get_token_authenticated_customer() -> Optional[str]:\n");
+        sb.append("    return os.getenv('INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER')\n\n\n");
+        sb.append("def get_preferred_auth_token() -> Optional[str]:\n");
+        sb.append("    t = get_token_authenticated_customer()\n");
+        sb.append("    if t:\n");
+        sb.append("        return t\n");
+        sb.append("    t = get_token_client_application()\n");
+        sb.append("    if t:\n");
+        sb.append("        return t\n");
+        sb.append("    return get_auth_token()\n\n\n");
 
         // Test class
         sb.append("class Test").append(toPascalCase(tag)).append("Integration:\n");
@@ -168,49 +190,170 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         Map<String, Object> operation = opInfo.operation;
         String operationId = (String) operation.get("operationId");
         String summary = (String) operation.get("summary");
-        String method = opInfo.method.toLowerCase();
+        String method = opInfo.method.toLowerCase(Locale.ROOT);
+        String methodUpper = method.toUpperCase(Locale.ROOT);
         String path = opInfo.path;
 
-        // Get operation name for test method
         String testMethodName = operationId != null
                 ? toSnakeCase(operationId)
                 : toSnakeCase(method + "_" + sanitizePath(path));
 
-        // Extract parameters
         List<Map<String, Object>> parameters = operation.containsKey("parameters")
                 ? Util.asStringObjectMapList(operation.get("parameters"))
                 : new ArrayList<>();
 
-        // Extract responses
         Map<String, Object> responses = operation.containsKey("responses")
                 ? Util.asStringObjectMap(operation.get("responses"))
                 : new HashMap<>();
 
-        // Check for security requirements
         boolean requiresAuth = operation.containsKey("security") &&
-                ((List<?>) operation.get("security")).size() > 0;
+                !((List<?>) operation.get("security")).isEmpty();
 
-        // Build path and query parameters
         Map<String, String> pathParams = new HashMap<>();
         Map<String, String> queryParams = new HashMap<>();
         for (Map<String, Object> param : parameters) {
             String paramName = (String) param.get("name");
             String paramIn = (String) param.get("in");
             if ("path".equals(paramIn)) {
-                String example = getParameterExample(param);
-                pathParams.put(paramName, example);
+                pathParams.put(paramName, IntegrationScenarioSupport.getParameterExample(param));
             } else if ("query".equals(paramIn)) {
-                String example = getParameterExample(param);
-                queryParams.put(paramName, example);
+                queryParams.put(paramName, IntegrationScenarioSupport.getParameterExample(param));
             }
         }
 
-        // Test: Successful request
-        sb.append("    def test_").append(testMethodName).append("_success(self):\n");
-        sb.append("        \"\"\"Test ").append(summary != null ? summary : method.toUpperCase() + " " + path).append(" - Successful Request\"\"\"\n");
-        sb.append("        # Arrange\n");
+        int maxBody = IntegrationScenarioSupport.maxInvalidBodyFields(config);
+        int maxParam = IntegrationScenarioSupport.maxInvalidParamCases(config);
+        String bodyRaw = IntegrationScenarioSupport.generateRequestBodyFromSchemaRaw(operation, spec);
+        String bodyPyEscaped = IntegrationScenarioSupport.escapeForPythonDoubleQuoted(bodyRaw);
+        Map<String, Object> bodySchema = IntegrationScenarioSupport.extractRequestBodySchema(operation, spec);
+        boolean jsonBody = "post".equals(method) || "put".equals(method) || "patch".equals(method);
 
-        if (!pathParams.isEmpty()) {
+        if (requiresAuth) {
+            sb.append("    def test_").append(testMethodName).append("_success_client_application(self):\n");
+            sb.append("        \"\"\"Successful request — client application token\"\"\"\n");
+            sb.append("        tok = get_token_client_application()\n");
+            sb.append("        if not tok:\n");
+            sb.append("            pytest.skip('Set INTEGRATION_TOKEN_CLIENT_APPLICATION (or API_BEARER_TOKEN / API_TOKEN)')\n");
+            appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+            sb.append("        headers = {'Accept': 'application/json', 'Authorization': f'Bearer {tok}'}\n");
+            appendPythonRequestInvocation(sb, methodUpper, jsonBody, bodyPyEscaped);
+            appendPythonSuccessAssertions(sb, responses);
+            appendPythonSuccessSchemaNotes(sb, responses, spec);
+            sb.append("\n");
+
+            sb.append("    def test_").append(testMethodName).append("_success_authenticated_customer(self):\n");
+            sb.append("        \"\"\"Successful request — authenticated customer token\"\"\"\n");
+            sb.append("        tok = get_token_authenticated_customer()\n");
+            sb.append("        if not tok:\n");
+            sb.append("            pytest.skip('Set INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER')\n");
+            appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+            sb.append("        headers = {'Accept': 'application/json', 'Authorization': f'Bearer {tok}'}\n");
+            appendPythonRequestInvocation(sb, methodUpper, jsonBody, bodyPyEscaped);
+            appendPythonSuccessAssertions(sb, responses);
+            appendPythonSuccessSchemaNotes(sb, responses, spec);
+            sb.append("\n");
+        } else {
+            sb.append("    def test_").append(testMethodName).append("_success(self):\n");
+            sb.append("        \"\"\"Test ").append(summary != null ? summary : methodUpper + " " + path).append(" - Successful Request\"\"\"\n");
+            appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+            sb.append("        headers = {'Accept': 'application/json'}\n");
+            appendPythonRequestInvocation(sb, methodUpper, jsonBody, bodyPyEscaped);
+            appendPythonSuccessAssertions(sb, responses);
+            appendPythonSuccessSchemaNotes(sb, responses, spec);
+            sb.append("\n");
+        }
+
+        List<IntegrationScenarioSupport.IntegrationParamNegativeCase> paramCases =
+                IntegrationScenarioSupport.buildParamNegativeCases(path, operation, pathParams, queryParams, maxParam);
+        for (IntegrationScenarioSupport.IntegrationParamNegativeCase nc : paramCases) {
+            String suffix = toSnakeCase(nc.name.replaceAll("[^a-zA-Z0-9]+", "_"));
+            if (suffix.length() > 50) {
+                suffix = suffix.substring(0, 50);
+            }
+            sb.append("    def test_").append(testMethodName).append("_param_negative_").append(suffix).append("(self):\n");
+            sb.append("        \"\"\"Parameter negative: ").append(nc.name.replace("\"", "'")).append("\"\"\"\n");
+            appendPythonPathUrlSetup(sb, path, nc.pathParams, nc.queryParams);
+            sb.append("        headers = {'Accept': 'application/json'}\n");
+            if (requiresAuth) {
+                sb.append("        _tok = get_preferred_auth_token()\n");
+                sb.append("        if _tok:\n");
+                sb.append("            headers['Authorization'] = f'Bearer {_tok}'\n");
+            }
+            appendPythonRequestInvocation(sb, methodUpper, jsonBody, bodyPyEscaped);
+            appendPythonExpectedStatuses(sb, nc.expectedStatusCodes);
+            appendPythonErrorBodyAssert(sb, responses, spec);
+            sb.append("\n");
+        }
+
+        if (requiresAuth) {
+            sb.append("    def test_").append(testMethodName).append("_anonymous_no_credentials(self):\n");
+            sb.append("        \"\"\"Anonymous customer — expect 401 or 403\"\"\"\n");
+            appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+            sb.append("        headers = {'Accept': 'application/json'}\n");
+            appendPythonRequestInvocation(sb, methodUpper, jsonBody, bodyPyEscaped);
+            sb.append("        assert response.status_code in (401, 403), f'Expected 401/403, got {response.status_code}'\n");
+            appendPythonErrorBodyAssert(sb, responses, spec);
+            sb.append("\n");
+        }
+
+        if (jsonBody) {
+            String wrongRaw = IntegrationScenarioSupport.generateWrongTypesBodyRaw(bodySchema, spec);
+            String wrongEsc = IntegrationScenarioSupport.escapeForPythonDoubleQuoted(wrongRaw);
+            sb.append("    def test_").append(testMethodName).append("_invalid_types(self):\n");
+            appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+            sb.append("        headers = {'Accept': 'application/json'}\n");
+            if (requiresAuth) {
+                sb.append("        _tok = get_preferred_auth_token()\n");
+                sb.append("        if _tok:\n");
+                sb.append("            headers['Authorization'] = f'Bearer {_tok}'\n");
+            }
+            appendPythonRequestInvocation(sb, methodUpper, true, wrongEsc);
+            sb.append("        assert response.status_code in (400, 422), f'Expected 400/422, got {response.status_code}'\n");
+            appendPythonErrorBodyAssert(sb, responses, spec);
+            sb.append("\n");
+
+            List<String> req = IntegrationScenarioSupport.getRequiredFieldsFromSchema(bodySchema);
+            if (!req.isEmpty()) {
+                String missRaw = IntegrationScenarioSupport.generateMissingRequiredFieldsBodyRaw(bodySchema, spec);
+                String missEsc = IntegrationScenarioSupport.escapeForPythonDoubleQuoted(missRaw);
+                sb.append("    def test_").append(testMethodName).append("_missing_required_fields(self):\n");
+                appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+                sb.append("        headers = {'Accept': 'application/json'}\n");
+                if (requiresAuth) {
+                    sb.append("        _tok = get_preferred_auth_token()\n");
+                    sb.append("        if _tok:\n");
+                    sb.append("            headers['Authorization'] = f'Bearer {_tok}'\n");
+                }
+                appendPythonRequestInvocation(sb, methodUpper, true, missEsc);
+                sb.append("        assert response.status_code in (400, 422), f'Expected 400/422, got {response.status_code}'\n");
+                appendPythonErrorBodyAssert(sb, responses, spec);
+                sb.append("\n");
+            }
+
+            List<IntegrationScenarioSupport.PerFieldInvalidBody> perField =
+                    IntegrationScenarioSupport.buildPerFieldInvalidBodies(bodySchema, spec, maxBody);
+            for (IntegrationScenarioSupport.PerFieldInvalidBody pf : perField) {
+                String fs = toSnakeCase(pf.fieldName.replaceAll("[^a-zA-Z0-9]+", "_"));
+                sb.append("    def test_").append(testMethodName).append("_invalid_field_").append(fs).append("(self):\n");
+                appendPythonPathUrlSetup(sb, path, pathParams, queryParams);
+                sb.append("        headers = {'Accept': 'application/json'}\n");
+                if (requiresAuth) {
+                    sb.append("        _tok = get_preferred_auth_token()\n");
+                    sb.append("        if _tok:\n");
+                    sb.append("            headers['Authorization'] = f'Bearer {_tok}'\n");
+                }
+                appendPythonRequestInvocation(sb, methodUpper, true,
+                        IntegrationScenarioSupport.escapeForPythonDoubleQuoted(pf.invalidJsonBody));
+                sb.append("        assert response.status_code in (400, 422), f'Expected 400/422, got {response.status_code}'\n");
+                appendPythonErrorBodyAssert(sb, responses, spec);
+                sb.append("\n");
+            }
+        }
+    }
+
+    private void appendPythonPathUrlSetup(StringBuilder sb, String path, Map<String, String> pathParams,
+                                          Map<String, String> queryParams) {
+        if (pathParams != null && !pathParams.isEmpty()) {
             sb.append("        path_params = {\n");
             for (Map.Entry<String, String> entry : pathParams.entrySet()) {
                 sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
@@ -220,8 +363,7 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         } else {
             sb.append("        path = '").append(path).append("'\n");
         }
-
-        if (!queryParams.isEmpty()) {
+        if (queryParams != null && !queryParams.isEmpty()) {
             sb.append("        query_params = {\n");
             for (Map.Entry<String, String> entry : queryParams.entrySet()) {
                 sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
@@ -231,150 +373,86 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         } else {
             sb.append("        url = f\"{BASE_URL}{path}\"\n");
         }
+    }
 
-        sb.append("        \n");
-        sb.append("        headers = {'Accept': 'application/json'}\n");
-
-        if (requiresAuth) {
-            sb.append("        token = get_auth_token()\n");
-            sb.append("        if token:\n");
-            sb.append("            headers['Authorization'] = f'Bearer {token}'\n");
-            sb.append("        \n");
-        }
-
-        if ("post".equals(method) || "put".equals(method) || "patch".equals(method)) {
-            sb.append("        headers['Content-Type'] = 'application/json'\n");
-            sb.append("        request_body = {}  # TODO: Generate request body from schema\n");
-            sb.append("        \n");
-            sb.append("        # Act\n");
-            sb.append("        response = requests.").append(method).append("(\n");
-            sb.append("            url,\n");
-            sb.append("            json=request_body,\n");
-            sb.append("            headers=headers,\n");
-            sb.append("            timeout=REQUEST_TIMEOUT\n");
-            sb.append("        )\n");
+    private void appendPythonRequestInvocation(StringBuilder sb, String methodUpper, boolean jsonBody, String jsonEscaped) {
+        if (jsonBody) {
+            sb.append("        body_obj = json.loads(\"").append(jsonEscaped).append("\")\n");
+            sb.append("        response = requests.request('").append(methodUpper).append("', url, headers=headers, json=body_obj, timeout=REQUEST_TIMEOUT)\n");
         } else {
-            sb.append("        \n");
-            sb.append("        # Act\n");
-            sb.append("        response = requests.").append(method).append("(\n");
-            sb.append("            url,\n");
-            sb.append("            headers=headers,\n");
-            sb.append("            timeout=REQUEST_TIMEOUT\n");
-            sb.append("        )\n");
+            sb.append("        response = requests.request('").append(methodUpper).append("', url, headers=headers, timeout=REQUEST_TIMEOUT)\n");
         }
+    }
 
-        sb.append("        \n");
-        sb.append("        # Assert\n");
-        sb.append("        assert response is not None, 'Response should not be None'\n");
-        if (responses.containsKey("200")) {
-            sb.append("        assert response.status_code == 200, f'Expected 200 OK, got {response.status_code}'\n");
-        } else if (responses.containsKey("201")) {
-            sb.append("        assert response.status_code == 201, f'Expected 201 Created, got {response.status_code}'\n");
+    private void appendPythonSuccessAssertions(StringBuilder sb, Map<String, Object> responses) {
+        sb.append("        assert response is not None\n");
+        if (responses != null && responses.containsKey("200")) {
+            sb.append("        assert response.status_code == 200, f'Expected 200, got {response.status_code}'\n");
+        } else if (responses != null && responses.containsKey("201")) {
+            sb.append("        assert response.status_code == 201, f'Expected 201, got {response.status_code}'\n");
         } else {
-            sb.append("        assert 200 <= response.status_code < 300, f'Expected success status, got {response.status_code}'\n");
+            sb.append("        assert 200 <= response.status_code < 300, f'Expected success, got {response.status_code}'\n");
         }
-        sb.append("        \n\n");
+    }
 
-        // Test: Missing required parameters
-        for (Map<String, Object> param : parameters) {
-            String paramName = (String) param.get("name");
-            Boolean required = param.containsKey("required") ? (Boolean) param.get("required") : false;
-            String paramIn = (String) param.get("in");
-
-            if (required && "query".equals(paramIn)) {
-                sb.append("    def test_").append(testMethodName).append("_missing_").append(toSnakeCase(paramName)).append("(self):\n");
-                sb.append("        \"\"\"Test ").append(summary != null ? summary : method.toUpperCase() + " " + path)
-                        .append(" - Missing Required Parameter: ").append(paramName).append("\"\"\"\n");
-                sb.append("        # Arrange - Missing required parameter: ").append(paramName).append("\n");
-
-                if (!pathParams.isEmpty()) {
-                    sb.append("        path_params = {\n");
-                    for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                        sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
-                    }
-                    sb.append("        }\n");
-                    sb.append("        path = replace_path_params('").append(path).append("', path_params)\n");
-                } else {
-                    sb.append("        path = '").append(path).append("'\n");
+    private void appendPythonExpectedStatuses(StringBuilder sb, List<Integer> codes) {
+        sb.append("        assert response is not None\n");
+        if (codes == null || codes.isEmpty()) {
+            sb.append("        assert response.status_code in (400, 422), f'Unexpected status {response.status_code}'\n");
+            return;
+        }
+        if (codes.size() == 1) {
+            sb.append("        assert response.status_code == ").append(codes.get(0)).append(", f'Unexpected status {response.status_code}'\n");
+        } else {
+            sb.append("        assert response.status_code in (");
+            for (int i = 0; i < codes.size(); i++) {
+                if (i > 0) {
+                    sb.append(", ");
                 }
+                sb.append(codes.get(i));
+            }
+            sb.append("), f'Unexpected status {response.status_code}'\n");
+        }
+    }
 
-                // Build query params without the required one
-                Map<String, String> otherQueryParams = new HashMap<>();
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    if (!entry.getKey().equals(paramName)) {
-                        otherQueryParams.put(entry.getKey(), entry.getValue());
-                    }
-                }
-
-                if (!otherQueryParams.isEmpty()) {
-                    sb.append("        query_params = {\n");
-                    for (Map.Entry<String, String> entry : otherQueryParams.entrySet()) {
-                        sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
-                    }
-                    sb.append("        }\n");
-                    sb.append("        url = build_url(path, query_params)\n");
-                } else {
-                    sb.append("        url = f\"{BASE_URL}{path}\"\n");
-                }
-
-                sb.append("        \n");
-                sb.append("        headers = {'Accept': 'application/json'}\n");
-                sb.append("        \n");
-                sb.append("        # Act\n");
-                sb.append("        response = requests.").append(method).append("(\n");
-                sb.append("            url,\n");
-                sb.append("            headers=headers,\n");
-                sb.append("            timeout=REQUEST_TIMEOUT\n");
-                sb.append("        )\n");
-                sb.append("        \n");
-                sb.append("        # Assert\n");
-                sb.append("        assert response.status_code == 400, f'Expected 400 Bad Request, got {response.status_code}'\n");
-                sb.append("        \n\n");
+    private void appendPythonErrorBodyAssert(StringBuilder sb, Map<String, Object> responses, Map<String, Object> spec) {
+        Map<String, Object> schema = null;
+        for (String code : new String[]{"422", "400", "401", "403", "404"}) {
+            schema = IntegrationScenarioSupport.resolveResponseSchema(code, responses, spec);
+            if (schema != null) {
+                break;
             }
         }
+        if (schema != null) {
+            sb.append("        try:\n");
+            sb.append("            _eb = response.json()\n");
+            sb.append("            assert isinstance(_eb, (dict, list))\n");
+            sb.append("        except ValueError:\n");
+            sb.append("            pass\n");
+        } else {
+            sb.append("        if response.text and response.text.strip().startswith('{'):\n");
+            sb.append("            try:\n");
+            sb.append("                _eb = response.json()\n");
+            sb.append("                assert isinstance(_eb, dict)\n");
+            sb.append("            except ValueError:\n");
+            sb.append("                pass\n");
+        }
+    }
 
-        // Test: Unauthorized access (if security is required)
-        if (requiresAuth) {
-            sb.append("    def test_").append(testMethodName).append("_unauthorized(self):\n");
-            sb.append("        \"\"\"Test ").append(summary != null ? summary : method.toUpperCase() + " " + path).append(" - Unauthorized Access\"\"\"\n");
-            sb.append("        # Arrange - Request without authentication\n");
-
-            if (!pathParams.isEmpty()) {
-                sb.append("        path_params = {\n");
-                for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                    sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
-                }
-                sb.append("        }\n");
-                sb.append("        path = replace_path_params('").append(path).append("', path_params)\n");
-            } else {
-                sb.append("        path = '").append(path).append("'\n");
+    private void appendPythonSuccessSchemaNotes(StringBuilder sb, Map<String, Object> responses, Map<String, Object> spec) {
+        Map<String, Object> schema = null;
+        for (String code : new String[]{"200", "201", "202"}) {
+            schema = IntegrationScenarioSupport.resolveResponseSchema(code, responses, spec);
+            if (schema != null) {
+                break;
             }
-
-            if (!queryParams.isEmpty()) {
-                sb.append("        query_params = {\n");
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    sb.append("            '").append(entry.getKey()).append("': '").append(entry.getValue()).append("',\n");
-                }
-                sb.append("        }\n");
-                sb.append("        url = build_url(path, query_params)\n");
-            } else {
-                sb.append("        url = f\"{BASE_URL}{path}\"\n");
-            }
-
-            sb.append("        \n");
-            sb.append("        headers = {'Accept': 'application/json'}\n");
-            sb.append("        # Intentionally omitting Authorization header\n");
-            sb.append("        \n");
-            sb.append("        # Act\n");
-            sb.append("        response = requests.").append(method).append("(\n");
-            sb.append("            url,\n");
-            sb.append("            headers=headers,\n");
-            sb.append("            timeout=REQUEST_TIMEOUT\n");
-            sb.append("        )\n");
-            sb.append("        \n");
-            sb.append("        # Assert\n");
-            sb.append("        assert response.status_code == 401, f'Expected 401 Unauthorized, got {response.status_code}'\n");
-            sb.append("        \n\n");
+        }
+        if (schema != null) {
+            sb.append("        try:\n");
+            sb.append("            _b = response.json()\n");
+            sb.append("            assert isinstance(_b, (dict, list))\n");
+            sb.append("        except ValueError:\n");
+            sb.append("            pytest.fail('Success response should be JSON when schema is declared')\n");
         }
     }
 
@@ -395,7 +473,10 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
                 "    slow: Slow running tests\n\n" +
                 "[env]\n" +
                 "API_BASE_URL=" + baseUrl + "\n" +
-                "# API_TOKEN=your_token_here\n";
+                "# INTEGRATION_TOKEN_CLIENT_APPLICATION=\n" +
+                "# INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER=\n" +
+                "# API_BEARER_TOKEN= / API_TOKEN= (fallbacks)\n" +
+                "# Caps (TestConfig additionalProperties): integrationMaxInvalidBodyFieldsPerOperation, integrationMaxInvalidParamCasesPerOperation\n";
 
         Files.write(Paths.get(outputDir, "pytest.ini"), configContent.getBytes(StandardCharsets.UTF_8));
     }
@@ -476,27 +557,6 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
     private String getOperationTag(Map<String, Object> operation) {
         List<String> tags = Util.asStringList(operation.get("tags"));
         return tags != null && !tags.isEmpty() ? tags.get(0) : "Default";
-    }
-
-    private String getParameterExample(Map<String, Object> param) {
-        if (param.containsKey("example")) {
-            return String.valueOf(param.get("example"));
-        }
-        if (param.containsKey("schema")) {
-            Map<String, Object> schema = Util.asStringObjectMap(param.get("schema"));
-            if (schema.containsKey("example")) {
-                return String.valueOf(schema.get("example"));
-            }
-            String type = (String) schema.get("type");
-            if ("string".equals(type)) {
-                return "test-value";
-            } else if ("integer".equals(type)) {
-                return "123";
-            } else if ("boolean".equals(type)) {
-                return "true";
-            }
-        }
-        return "example";
     }
 
     private String toSnakeCase(String name) {

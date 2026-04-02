@@ -14,8 +14,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Non-Functional Requirements (NFR) test generator
- * Generates tests for performance, scalability, reliability, and availability
+ * Non-Functional Requirements (NFR) test generator.
+ * Emits JUnit 5 + RestAssured tests for performance, scalability, reliability, and availability
+ * (concurrent load, response time and success rate, health-style checks).
  */
 public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerator {
 
@@ -82,43 +83,45 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
         // Imports
         sb.append("import org.junit.jupiter.api.*;\n");
         sb.append("import org.junit.jupiter.api.DisplayName;\n");
-        sb.append("import static org.junit.jupiter.api.Assertions.*;\n\n");
-        sb.append("import java.net.http.*;\n");
-        sb.append("import java.net.URI;\n");
-        sb.append("import java.time.Duration;\n");
+        sb.append("import static org.junit.jupiter.api.Assertions.*;\n");
+        sb.append("import static io.restassured.RestAssured.given;\n\n");
+        sb.append("import io.restassured.http.ContentType;\n");
+        sb.append("import io.restassured.response.Response;\n");
         sb.append("import java.util.*;\n");
-        sb.append("import java.util.concurrent.*;\n");
-        sb.append("import java.util.stream.IntStream;\n\n");
+        sb.append("import java.util.concurrent.*;\n\n");
 
         // Class declaration
         sb.append("/**\n");
-        sb.append(" * Non-Functional Requirements (NFR) Tests\n");
-        sb.append(" * Generated from OpenAPI specification\n");
-        sb.append(" * \n");
-        sb.append(" * Tests for:\n");
-        sb.append(" * - Performance (response time, throughput)\n");
-        sb.append(" * - Scalability (concurrent requests)\n");
-        sb.append(" * - Reliability (error rates, retry logic)\n");
-        sb.append(" * - Availability (uptime, health checks)\n");
+        sb.append(" * Non-Functional Requirements (NFR) Tests (generated from OpenAPI).\n");
+        sb.append(" * <p>Requires {@code io.rest-assured:rest-assured} (5.x) and JUnit 5.\n");
+        sb.append(" * Override base URL with env {@code API_BASE_URL}; optional {@code API_TOKEN} for Authorization.\n");
+        sb.append(" * <ul>\n");
+        sb.append(" * <li>Performance: response time on representative GET operations.</li>\n");
+        sb.append(" * <li>Scalability: parallel RestAssured calls simulate concurrent users; throughput, latency, and success rate.</li>\n");
+        sb.append(" * <li>Reliability: repeated requests to bound error rate under load.</li>\n");
+        sb.append(" * <li>Availability: health-style GET expects non-server-error status.</li>\n");
+        sb.append(" * </ul>\n");
         sb.append(" */\n");
         sb.append("@DisplayName(\"NFR Tests\")\n");
         sb.append("public class ").append(className).append(" {\n\n");
 
         // Constants
-        sb.append("    private static final String BASE_URL = \"").append(baseUrl).append("\";\n");
-        sb.append("    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);\n");
         sb.append("    private static final int MAX_RESPONSE_TIME_MS = 2000; // 2 seconds\n");
         sb.append("    private static final int CONCURRENT_USERS = 10;\n");
         sb.append("    private static final int REQUESTS_PER_USER = 10;\n");
-        sb.append("    private static final double MAX_ERROR_RATE = 0.01; // 1%\n");
-        sb.append("    private static HttpClient httpClient;\n\n");
+        sb.append("    private static final double MAX_ERROR_RATE = 0.01; // 1%\n\n");
 
         // Setup
         sb.append("    @BeforeAll\n");
-        sb.append("    static void setUpAll() {\n");
-        sb.append("        httpClient = HttpClient.newBuilder()\n");
-        sb.append("            .connectTimeout(REQUEST_TIMEOUT)\n");
-        sb.append("            .build();\n");
+        sb.append("    static void initRestAssured() {\n");
+        sb.append("        String env = System.getenv(\"API_BASE_URL\");\n");
+        sb.append("        io.restassured.RestAssured.baseURI = (env != null && !env.isEmpty()) ? env : \"")
+                .append(escapeJavaString(baseUrl)).append("\";\n");
+        sb.append("    }\n\n");
+
+        sb.append("    private static String authToken() {\n");
+        sb.append("        String t = System.getenv(\"API_TOKEN\");\n");
+        sb.append("        return t != null ? t : \"\";\n");
         sb.append("    }\n\n");
 
         // Performance tests
@@ -135,26 +138,21 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
 
         // Helper methods
         sb.append("    /**\n");
-        sb.append("     * Send HTTP request and measure response time\n");
+        sb.append("     * Execute concurrent GET requests; returns response times in ms, or -1 on failure.\n");
         sb.append("     */\n");
-        sb.append("    private long sendRequestAndMeasureTime(HttpRequest request) throws Exception {\n");
-        sb.append("        long startTime = System.currentTimeMillis();\n");
-        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n");
-        sb.append("        long endTime = System.currentTimeMillis();\n");
-        sb.append("        return endTime - startTime;\n");
-        sb.append("    }\n\n");
-
-        sb.append("    /**\n");
-        sb.append("     * Execute concurrent requests\n");
-        sb.append("     */\n");
-        sb.append("    private List<Long> executeConcurrentRequests(HttpRequest request, int count) {\n");
+        sb.append("    private List<Long> executeConcurrentGets(String path, int count) {\n");
         sb.append("        ExecutorService executor = Executors.newFixedThreadPool(CONCURRENT_USERS);\n");
         sb.append("        List<CompletableFuture<Long>> futures = new ArrayList<>();\n");
         sb.append("        \n");
         sb.append("        for (int i = 0; i < count; i++) {\n");
         sb.append("            futures.add(CompletableFuture.supplyAsync(() -> {\n");
         sb.append("                try {\n");
-        sb.append("                    return sendRequestAndMeasureTime(request);\n");
+        sb.append("                    Response response = given()\n");
+        sb.append("                        .accept(ContentType.JSON)\n");
+        sb.append("                        .header(\"Authorization\", authToken())\n");
+        sb.append("                        .when()\n");
+        sb.append("                        .get(path);\n");
+        sb.append("                    return response.getTime();\n");
         sb.append("                } catch (Exception e) {\n");
         sb.append("                    return -1L; // Error indicator\n");
         sb.append("                }\n");
@@ -196,23 +194,21 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
                 if (pathItem.containsKey("get")) {
                     Map<String, Object> operation = Util.asStringObjectMap(pathItem.get("get"));
                     String summary = (String) operation.get("summary");
+                    String display = summary != null ? summary : "GET " + path;
 
                     sb.append("    @Test\n");
-                    sb.append("    @DisplayName(\"Performance: ").append(summary != null ? summary : "GET " + path)
+                    sb.append("    @DisplayName(\"Performance: ").append(escapeJavaString(display))
                             .append(" - Response Time\")\n");
-                    sb.append("    void testPerformance_ResponseTime_").append(sanitizePath(path)).append("() throws Exception {\n");
-                    sb.append("        // Arrange\n");
-                    sb.append("        URI uri = URI.create(BASE_URL + \"").append(path).append("\");\n");
-                    sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-                    sb.append("            .uri(uri)\n");
-                    sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-                    sb.append("            .GET()\n");
-                    sb.append("            .header(\"Accept\", \"application/json\")\n");
-                    sb.append("            .build();\n\n");
-                    sb.append("        // Act - Measure response time\n");
-                    sb.append("        long responseTime = sendRequestAndMeasureTime(request);\n\n");
-                    sb.append("        // Assert\n");
-                    sb.append("        assertTrue(responseTime < MAX_RESPONSE_TIME_MS, \n");
+                    sb.append("    void testPerformance_ResponseTime_").append(sanitizePath(path)).append("() {\n");
+                    sb.append("        Response response = given()\n");
+                    sb.append("            .accept(ContentType.JSON)\n");
+                    sb.append("            .header(\"Authorization\", authToken())\n");
+                    sb.append("            .when()\n");
+                    sb.append("            .get(\"").append(escapeJavaString(path)).append("\");\n\n");
+                    sb.append("        long responseTime = response.getTime();\n\n");
+                    sb.append("        assertTrue(response.getStatusCode() < 500,\n");
+                    sb.append("            \"Unexpected server error, status \" + response.getStatusCode());\n");
+                    sb.append("        assertTrue(responseTime < MAX_RESPONSE_TIME_MS,\n");
                     sb.append("            \"Response time should be less than \" + MAX_RESPONSE_TIME_MS + \"ms, but was \" + responseTime + \"ms\");\n");
                     sb.append("    }\n\n");
                 }
@@ -229,36 +225,27 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
         Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
         if (paths != null && !paths.isEmpty()) {
             String firstPath = paths.keySet().iterator().next();
+            String escapedPath = escapeJavaString(firstPath);
 
             sb.append("    @Test\n");
             sb.append("    @DisplayName(\"Scalability: Concurrent Request Handling\")\n");
-            sb.append("    void testScalability_ConcurrentRequests() throws Exception {\n");
-            sb.append("        // Arrange\n");
-            sb.append("        URI uri = URI.create(BASE_URL + \"").append(firstPath).append("\");\n");
-            sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-            sb.append("            .uri(uri)\n");
-            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-            sb.append("            .GET()\n");
-            sb.append("            .header(\"Accept\", \"application/json\")\n");
-            sb.append("            .build();\n\n");
-            sb.append("        // Act - Execute concurrent requests\n");
+            sb.append("    void testScalability_ConcurrentRequests() {\n");
+            sb.append("        String path = \"").append(escapedPath).append("\";\n");
             sb.append("        int totalRequests = CONCURRENT_USERS * REQUESTS_PER_USER;\n");
-            sb.append("        List<Long> responseTimes = executeConcurrentRequests(request, totalRequests);\n\n");
-            sb.append("        // Assert\n");
+            sb.append("        List<Long> responseTimes = executeConcurrentGets(path, totalRequests);\n\n");
             sb.append("        long successCount = responseTimes.stream().filter(rt -> rt > 0).count();\n");
             sb.append("        double successRate = (double) successCount / totalRequests;\n");
             sb.append("        \n");
-            sb.append("        assertTrue(successRate >= (1.0 - MAX_ERROR_RATE), \n");
+            sb.append("        assertTrue(successRate >= (1.0 - MAX_ERROR_RATE),\n");
             sb.append("            \"Success rate should be at least \" + (1.0 - MAX_ERROR_RATE) + \", but was \" + successRate);\n");
             sb.append("        \n");
-            sb.append("        // Calculate average response time\n");
             sb.append("        double avgResponseTime = responseTimes.stream()\n");
             sb.append("            .filter(rt -> rt > 0)\n");
             sb.append("            .mapToLong(Long::longValue)\n");
             sb.append("            .average()\n");
             sb.append("            .orElse(0.0);\n");
             sb.append("        \n");
-            sb.append("        assertTrue(avgResponseTime < MAX_RESPONSE_TIME_MS * 2, \n");
+            sb.append("        assertTrue(avgResponseTime < MAX_RESPONSE_TIME_MS * 2,\n");
             sb.append("            \"Average response time under load should be reasonable, but was \" + avgResponseTime + \"ms\");\n");
             sb.append("    }\n\n");
         }
@@ -272,31 +259,25 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
 
         sb.append("    @Test\n");
         sb.append("    @DisplayName(\"Reliability: Error Rate Under Normal Load\")\n");
-        sb.append("    void testReliability_ErrorRate() throws Exception {\n");
-        sb.append("        // Arrange\n");
-        sb.append("        URI uri = URI.create(BASE_URL);\n");
-        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-        sb.append("            .uri(uri)\n");
-        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-        sb.append("            .GET()\n");
-        sb.append("            .build();\n\n");
-        sb.append("        // Act - Execute multiple requests\n");
+        sb.append("    void testReliability_ErrorRate() {\n");
         sb.append("        int requestCount = 100;\n");
         sb.append("        int errorCount = 0;\n");
         sb.append("        \n");
         sb.append("        for (int i = 0; i < requestCount; i++) {\n");
         sb.append("            try {\n");
-        sb.append("                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n");
-        sb.append("                if (response.statusCode() >= 500) {\n");
+        sb.append("                Response response = given()\n");
+        sb.append("                    .header(\"Authorization\", authToken())\n");
+        sb.append("                    .when()\n");
+        sb.append("                    .get(\"/\");\n");
+        sb.append("                if (response.getStatusCode() >= 500) {\n");
         sb.append("                    errorCount++;\n");
         sb.append("                }\n");
         sb.append("            } catch (Exception e) {\n");
         sb.append("                errorCount++;\n");
         sb.append("            }\n");
         sb.append("        }\n\n");
-        sb.append("        // Assert\n");
         sb.append("        double errorRate = (double) errorCount / requestCount;\n");
-        sb.append("        assertTrue(errorRate <= MAX_ERROR_RATE, \n");
+        sb.append("        assertTrue(errorRate <= MAX_ERROR_RATE,\n");
         sb.append("            \"Error rate should be at most \" + MAX_ERROR_RATE + \", but was \" + errorRate);\n");
         sb.append("    }\n\n");
     }
@@ -309,19 +290,13 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
 
         sb.append("    @Test\n");
         sb.append("    @DisplayName(\"Availability: Health Check\")\n");
-        sb.append("    void testAvailability_HealthCheck() throws Exception {\n");
-        sb.append("        // Arrange\n");
-        sb.append("        URI uri = URI.create(BASE_URL);\n");
-        sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-        sb.append("            .uri(uri)\n");
-        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-        sb.append("            .GET()\n");
-        sb.append("            .build();\n\n");
-        sb.append("        // Act\n");
-        sb.append("        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());\n\n");
-        sb.append("        // Assert\n");
-        sb.append("        assertTrue(response.statusCode() < 500, \n");
-        sb.append("            \"Service should be available (status code < 500), but got \" + response.statusCode());\n");
+        sb.append("    void testAvailability_HealthCheck() {\n");
+        sb.append("        Response response = given()\n");
+        sb.append("            .header(\"Authorization\", authToken())\n");
+        sb.append("            .when()\n");
+        sb.append("            .get(\"/\");\n\n");
+        sb.append("        assertTrue(response.getStatusCode() < 500,\n");
+        sb.append("            \"Service should be available (status code < 500), but got \" + response.getStatusCode());\n");
         sb.append("    }\n\n");
     }
 
@@ -339,6 +314,13 @@ public class NFRTestGenerator implements TestGenerator, ConfigurableTestGenerato
                 "timeout.seconds=30\n";
 
         Files.write(Paths.get(outputDir, "nfr-config.properties"), configContent.getBytes());
+    }
+
+    private static String escapeJavaString(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     // Helper methods

@@ -5,8 +5,10 @@ import egain.oassdk.core.exceptions.GenerationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -32,5 +34,31 @@ public class NFRTestGeneratorTest {
         );
         generator.generate(spec, tempDir.toString(), new TestConfig(), "pytest");
         assertTrue(Files.exists(tempDir));
+    }
+
+    @Test
+    public void testGeneratedNFRTestUsesRestAssured(@TempDir Path tempDir) throws Exception {
+        NFRTestGenerator generator = new NFRTestGenerator();
+        Map<String, Object> spec = Map.of(
+                "info", Map.of("title", "API", "version", "1.0"),
+                "servers", List.of(Map.of("url", "http://localhost:9999")),
+                "paths", Map.of("/ping", Map.of("get", Map.of("summary", "Health ping")))
+        );
+        generator.generate(spec, tempDir.toString(), new TestConfig(), "junit");
+
+        Path testFile = tempDir.resolve("nfr").resolve("com").resolve("example").resolve("api").resolve("NFRTest.java");
+        assertTrue(Files.exists(testFile), "Expected NFRTest.java at " + testFile);
+        String content = Files.readString(testFile, StandardCharsets.UTF_8);
+
+        assertTrue(content.contains("static io.restassured.RestAssured.given"),
+                "Generated NFR tests should static-import RestAssured given()");
+        assertTrue(content.contains("initRestAssured"),
+                "Generated NFR tests should define initRestAssured");
+        assertTrue(content.contains("io.restassured.RestAssured.baseURI"),
+                "Generated NFR tests should set RestAssured base URI");
+        assertFalse(content.contains("java.net.http.HttpClient"),
+                "Generated NFR tests should not use java.net.http.HttpClient");
+        assertFalse(content.contains("HttpClient.newBuilder"),
+                "Generated NFR tests should not build HttpClient");
     }
 }
