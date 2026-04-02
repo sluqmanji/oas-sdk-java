@@ -561,7 +561,6 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                                 if (propSchema.containsKey("minLength")) {
                                     int minLen = ((Number) propSchema.get("minLength")).intValue();
                                     if (minLen > 0) {
-                                        String tooShort = "\"a\"".substring(0, Math.max(1, minLen - 1));
                                         sb.append("    @Test\n");
                                         sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
                                                 .append(" - Boundary: ").append(propName).append(" below minLength\")\n");
