@@ -168,9 +168,9 @@ public class UnitTestGeneratorTest {
                     try {
                         String content = Files.readString(testFile);
                         // Check that test methods are public
-                        assertTrue(content.contains("public void test") || 
-                                  content.contains("public void setUp()"),
-                            "Generated test methods should be public in " + testFile.getFileName());
+                        assertTrue(content.contains("public void test")
+                                || content.contains("static void initRestAssured"),
+                            "Generated API tests should declare public test methods or static initRestAssured in " + testFile.getFileName());
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
                     }
@@ -270,16 +270,12 @@ public class UnitTestGeneratorTest {
                     try {
                         String content = Files.readString(testFile);
                         if (content.contains("_ValidRequest()")) {
-                            // Check for comprehensive assertions
-                            assertTrue(content.contains("assertNotNull(request"), 
-                                "Valid request test should have assertNotNull(request) in " + testFile.getFileName());
-                            assertTrue(content.contains("assertEquals") || content.contains("assertTrue(uri.toString().startsWith(BASE_URL)"),
-                                "Valid request test should have URI validation assertions in " + testFile.getFileName());
-                            assertTrue(content.contains("assertNotNull(uri") || content.contains("assertNotNull(path"),
-                                "Valid request test should have URI/path validation in " + testFile.getFileName());
-                            assertTrue(content.contains("assertNotNull(request.headers()") || 
-                                      content.contains("assertTrue(request.headers().firstValue"),
-                                "Valid request test should have header validation in " + testFile.getFileName());
+                            assertTrue(content.contains("given()"),
+                                "Valid request test should use RestAssured given() in " + testFile.getFileName());
+                            assertTrue(content.contains(".when()"),
+                                "Valid request test should use .when() in " + testFile.getFileName());
+                            assertTrue(content.contains(".then()") && content.contains("statusCode"),
+                                "Valid request test should use .then() and statusCode in " + testFile.getFileName());
                         }
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
@@ -315,8 +311,8 @@ public class UnitTestGeneratorTest {
                             assertTrue(content.contains("Map<String, String> pathParams = new HashMap<>()") ||
                                       content.contains("Map<String, String> queryParams = new HashMap<>()"),
                                 "Invalid parameter test should declare pathParams/queryParams in " + testFile.getFileName());
-                            assertTrue(content.contains("TODO: Mock HTTP client") || content.contains("assertTrue"),
-                                "Invalid parameter test should have TODO or assertions in " + testFile.getFileName());
+                            assertTrue(content.contains("assertFalse") || content.contains("statusCode"),
+                                "Invalid parameter test should assert pattern or status in " + testFile.getFileName());
                         }
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
@@ -353,9 +349,8 @@ public class UnitTestGeneratorTest {
                                 "Missing required parameter test should declare pathParams in " + testFile.getFileName());
                             assertTrue(content.contains("Map<String, String> queryParams = new HashMap<>()"),
                                 "Missing required parameter test should declare queryParams in " + testFile.getFileName());
-                            assertTrue(content.contains("assertFalse(uri.toString().contains") || 
-                                      content.contains("TODO: Mock HTTP client"),
-                                "Missing required parameter test should have validation or TODO in " + testFile.getFileName());
+                            assertTrue(content.contains(".then()") && content.contains("statusCode"),
+                                "Missing required parameter test should assert HTTP error status in " + testFile.getFileName());
                         }
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
@@ -391,8 +386,8 @@ public class UnitTestGeneratorTest {
                             assertTrue(content.contains("Map<String, String> pathParams = new HashMap<>()") ||
                                       content.contains("Map<String, String> queryParams = new HashMap<>()"),
                                 "Status code test should declare pathParams/queryParams in " + testFile.getFileName());
-                            assertTrue(content.contains("TODO: Mock HTTP client") || content.contains("assertNotNull(request"),
-                                "Status code test should have TODO or assertions in " + testFile.getFileName());
+                            assertTrue(content.contains("getStatusCode()") || content.contains("Response"),
+                                "Status code test should inspect RestAssured Response in " + testFile.getFileName());
                         }
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
@@ -402,17 +397,10 @@ public class UnitTestGeneratorTest {
     }
     
     @Test
-    public void testSetUpMethodIsPublic(@TempDir Path tempDir) throws GenerationException, java.io.IOException {
-        // Arrange
+    public void testBeforeAllInitRestAssuredIsPresent(@TempDir Path tempDir) throws GenerationException, java.io.IOException {
         testConfig.setTestFramework("junit5");
-        
-        // Act
         generator.generate(spec, tempDir.toString(), testConfig, "junit5");
-        
-        // Assert - Check that setUp method is public
-        Path unitDir = tempDir.resolve("unit");
-        Path packageDir = unitDir.resolve("com/example/api");
-        
+        Path packageDir = tempDir.resolve("unit").resolve("com/example/api");
         if (Files.exists(packageDir)) {
             Files.walk(packageDir)
                 .filter(Files::isRegularFile)
@@ -420,10 +408,10 @@ public class UnitTestGeneratorTest {
                 .forEach(testFile -> {
                     try {
                         String content = Files.readString(testFile);
-                        if (content.contains("@BeforeEach")) {
-                            assertTrue(content.contains("public void setUp()"),
-                                "setUp method should be public in " + testFile.getFileName());
-                        }
+                        assertTrue(content.contains("@BeforeAll"),
+                            "Generated API test should use @BeforeAll in " + testFile.getFileName());
+                        assertTrue(content.contains("initRestAssured"),
+                            "Generated API test should define initRestAssured in " + testFile.getFileName());
                     } catch (java.io.IOException e) {
                         fail("Failed to read test file: " + testFile);
                     }

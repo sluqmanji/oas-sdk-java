@@ -15,6 +15,9 @@ import java.util.Set;
  */
 public final class PostmanNegativeRequestFactory {
 
+    /** Avoid multi-gigabyte strings when OpenAPI minLength/maxLength are extreme. */
+    private static final int MAX_STRING_LENGTH_NEGATIVE_CASE = 8192;
+
     private PostmanNegativeRequestFactory() {
     }
 
@@ -171,7 +174,7 @@ public final class PostmanNegativeRequestFactory {
 
         if ("string".equals(type) && schema.containsKey("minLength") && cases.size() < maxCases) {
             int minLen = schema.get("minLength") instanceof Number n ? n.intValue() : 0;
-            if (minLen > 0) {
+            if (minLen > 0 && minLen - 1 <= MAX_STRING_LENGTH_NEGATIVE_CASE) {
                 cases.add(new NegativeCase(
                         "Path " + pathName + " shorter than minLength",
                         Map.of(pathName, PostmanParameterSupport.repeatChar('x', minLen - 1)),
@@ -182,7 +185,7 @@ public final class PostmanNegativeRequestFactory {
 
         if ("string".equals(type) && schema.containsKey("maxLength") && cases.size() < maxCases) {
             int maxLen = schema.get("maxLength") instanceof Number n ? n.intValue() : 0;
-            if (maxLen >= 0) {
+            if (maxLen >= 0 && maxLen + 1 <= MAX_STRING_LENGTH_NEGATIVE_CASE) {
                 cases.add(new NegativeCase(
                         "Path " + pathName + " exceeds maxLength",
                         Map.of(pathName, PostmanParameterSupport.repeatChar('x', maxLen + 1)),
@@ -240,7 +243,7 @@ public final class PostmanNegativeRequestFactory {
 
         if ("string".equals(type) && schema.containsKey("minLength") && cases.size() < maxCases) {
             int minLen = schema.get("minLength") instanceof Number n ? n.intValue() : 0;
-            if (minLen > 0) {
+            if (minLen > 0 && minLen - 1 <= MAX_STRING_LENGTH_NEGATIVE_CASE) {
                 List<Map<String, Object>> q = replaceQueryValue(positiveQueryList, paramName,
                         PostmanParameterSupport.repeatChar('a', minLen - 1));
                 cases.add(new NegativeCase("Query " + paramName + " shorter than minLength", Map.of(), q, default4xx));
@@ -249,7 +252,7 @@ public final class PostmanNegativeRequestFactory {
 
         if ("string".equals(type) && schema.containsKey("maxLength") && cases.size() < maxCases) {
             int maxLen = schema.get("maxLength") instanceof Number n ? n.intValue() : 0;
-            if (maxLen >= 0) {
+            if (maxLen >= 0 && maxLen + 1 <= MAX_STRING_LENGTH_NEGATIVE_CASE) {
                 List<Map<String, Object>> q = replaceQueryValue(positiveQueryList, paramName,
                         PostmanParameterSupport.repeatChar('b', maxLen + 1));
                 cases.add(new NegativeCase("Query " + paramName + " exceeds maxLength", Map.of(), q, default4xx));

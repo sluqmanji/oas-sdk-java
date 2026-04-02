@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -128,6 +129,21 @@ public class IntegrationTestGeneratorTest {
     }
     
     @Test
+    public void testGenerate_expandedIntegrationPatterns(@TempDir Path tempDir) throws Exception {
+        generator.generate(buildRichSecuredPostSpec(), tempDir.toString(), testConfig, "junit5");
+
+        Path javaFile = tempDir.resolve("integration/com/example/api/ItemsIntegrationTest.java");
+        assertTrue(Files.exists(javaFile));
+        String content = Files.readString(javaFile);
+        assertTrue(content.contains("getTokenClientApplication"));
+        assertTrue(content.contains("getTokenAuthenticatedCustomer"));
+        assertTrue(content.contains("_AnonymousNoCredentials"));
+        assertTrue(content.contains("_InvalidBodyField_"));
+        assertTrue(content.contains("_ParamNegative_"));
+        assertTrue(content.contains("INTEGRATION_TOKEN_CLIENT_APPLICATION"));
+    }
+
+    @Test
     public void testGenerate_WithServers(@TempDir Path tempDir) throws GenerationException {
         // Arrange
         Map<String, Object> specWithServers = new HashMap<>(spec);
@@ -161,6 +177,57 @@ public class IntegrationTestGeneratorTest {
         paths.put("/test", pathItem);
         spec.put("paths", paths);
         
+        return spec;
+    }
+
+    private Map<String, Object> buildRichSecuredPostSpec() {
+        Map<String, Object> schemas = new HashMap<>();
+        Map<String, Object> itemProps = new HashMap<>();
+        itemProps.put("title", Map.of("type", "string"));
+        itemProps.put("count", Map.of("type", "integer"));
+        schemas.put("ItemRequest", Map.of(
+                "type", "object",
+                "properties", itemProps,
+                "required", List.of("title")
+        ));
+        schemas.put("Error", Map.of(
+                "type", "object",
+                "properties", Map.of("message", Map.of("type", "string"))
+        ));
+
+        Map<String, Object> components = new HashMap<>();
+        components.put("schemas", schemas);
+        components.put("securitySchemes", Map.of("bearerAuth", Map.of(
+                "type", "http",
+                "scheme", "bearer",
+                "bearerFormat", "JWT"
+        )));
+
+        Map<String, Object> post = new HashMap<>();
+        post.put("operationId", "createItem");
+        post.put("summary", "Create item");
+        post.put("tags", List.of("items"));
+        post.put("security", List.of(Map.of("bearerAuth", List.of())));
+        Map<String, Object> rbSchema = new HashMap<>();
+        rbSchema.put("$ref", "#/components/schemas/ItemRequest");
+        post.put("requestBody", Map.of(
+                "required", true,
+                "content", Map.of("application/json", Map.of("schema", rbSchema))
+        ));
+        Map<String, Object> badContent = Map.of(
+                "description", "Bad Request",
+                "content", Map.of("application/json", Map.of("schema", Map.of("$ref", "#/components/schemas/Error")))
+        );
+        post.put("responses", Map.of(
+                "201", Map.of("description", "Created"),
+                "400", badContent
+        ));
+
+        Map<String, Object> spec = new HashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("info", Map.of("title", "Rich API", "version", "1.0.0"));
+        spec.put("paths", Map.of("/items", Map.of("post", post)));
+        spec.put("components", components);
         return spec;
     }
 }

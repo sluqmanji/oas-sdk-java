@@ -1225,7 +1225,8 @@ public class OASParser {
                 if (currentMap == null) {
                     throw new OASSDKException("Invalid reference path: " + jsonPath);
                 }
-                current = currentMap.get(part);
+                String key = decodeJsonPointerSegment(part);
+                current = currentMap.get(key);
                 if (current == null) {
                     throw new OASSDKException("Reference not found: " + jsonPath);
                 }
@@ -1235,5 +1236,33 @@ public class OASParser {
         }
 
         return current;
+    }
+
+    /**
+     * RFC 6901 JSON Pointer token: {@code ~1} → {@code /}, {@code ~0} → {@code ~}.
+     */
+    private static String decodeJsonPointerSegment(String segment) {
+        if (segment == null || segment.indexOf('~') < 0) {
+            return segment;
+        }
+        StringBuilder sb = new StringBuilder(segment.length());
+        for (int i = 0; i < segment.length(); i++) {
+            char c = segment.charAt(i);
+            if (c == '~' && i + 1 < segment.length()) {
+                char n = segment.charAt(i + 1);
+                if (n == '1') {
+                    sb.append('/');
+                    i++;
+                } else if (n == '0') {
+                    sb.append('~');
+                    i++;
+                } else {
+                    sb.append(c);
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 }

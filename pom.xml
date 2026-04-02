@@ -240,6 +240,38 @@
                 </configuration>
             </plugin>
 
+            <!-- Examples under examples/egain/oassdk/examples (avoids duplicate classes in examples/ root) -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>add-nested-examples-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>examples/egain/oassdk/examples</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Run: mvn -q exec:java -Dexec.mainClass=egain.oassdk.examples.GeneratePublishedV4Tests -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>egain.oassdk.examples.GeneratePublishedV4Tests</mainClass>
+                    <jvmArgs>-Xmx4g</jvmArgs>
+                </configuration>
+            </plugin>
+
             <!-- Surefire plugin for testing -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

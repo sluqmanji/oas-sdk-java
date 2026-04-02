@@ -5,6 +5,7 @@ import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.Constants;
 import egain.oassdk.core.exceptions.GenerationException;
 import egain.oassdk.testgenerators.ConfigurableTestGenerator;
+import egain.oassdk.testgenerators.IntegrationScenarioSupport;
 import egain.oassdk.testgenerators.TestGenerator;
 
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -125,8 +127,7 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
         sb.append("import org.junit.jupiter.api.*;\n");
         sb.append("import org.junit.jupiter.api.DisplayName;\n");
         sb.append("import org.junit.jupiter.api.Order;\n");
-        sb.append("import org.junit.jupiter.params.ParameterizedTest;\n");
-        sb.append("import org.junit.jupiter.params.provider.ValueSource;\n");
+        sb.append("import org.junit.jupiter.api.Assumptions;\n");
         sb.append("import static org.junit.jupiter.api.Assertions.*;\n\n");
         sb.append("import java.net.http.*;\n");
         sb.append("import java.net.URI;\n");
@@ -231,11 +232,132 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
         sb.append("    }\n\n");
 
         generateAuthSetupFromSecuritySchemes(sb, spec);
-
+        appendMultiContextAuthHelpers(sb);
 
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    private void appendMultiContextAuthHelpers(StringBuilder sb) {
+        sb.append("    /** Client application token: INTEGRATION_TOKEN_CLIENT_APPLICATION; falls back to API_BEARER_TOKEN, API_TOKEN */\n");
+        sb.append("    private String getTokenClientApplication() {\n");
+        sb.append("        String t = System.getenv(\"INTEGRATION_TOKEN_CLIENT_APPLICATION\");\n");
+        sb.append("        if (t == null || t.isEmpty()) {\n");
+        sb.append("            t = System.getenv(\"API_BEARER_TOKEN\");\n");
+        sb.append("        }\n");
+        sb.append("        if (t == null || t.isEmpty()) {\n");
+        sb.append("            t = System.getenv(\"API_TOKEN\");\n");
+        sb.append("        }\n");
+        sb.append("        return t;\n");
+        sb.append("    }\n\n");
+        sb.append("    /** Authenticated customer: INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER */\n");
+        sb.append("    private String getTokenAuthenticatedCustomer() {\n");
+        sb.append("        return System.getenv(\"INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER\");\n");
+        sb.append("    }\n\n");
+        sb.append("    /** Prefer customer, then client app, then legacy getAuthToken() */\n");
+        sb.append("    private String getPreferredAuthToken() {\n");
+        sb.append("        String t = getTokenAuthenticatedCustomer();\n");
+        sb.append("        if (t != null && !t.isEmpty()) {\n");
+        sb.append("            return t;\n");
+        sb.append("        }\n");
+        sb.append("        t = getTokenClientApplication();\n");
+        sb.append("        if (t != null && !t.isEmpty()) {\n");
+        sb.append("            return t;\n");
+        sb.append("        }\n");
+        sb.append("        return getAuthToken();\n");
+        sb.append("    }\n\n");
+    }
+
+    private void appendJavaPathUriBlocks(StringBuilder sb, String pathTemplate,
+                                         Map<String, String> pathParams, Map<String, String> queryParams) {
+        if (pathParams != null && !pathParams.isEmpty()) {
+            sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
+            for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+                sb.append("        pathParams.put(\"")
+                        .append(entry.getKey()).append("\", \"")
+                        .append(IntegrationScenarioSupport.escapeJavaString(entry.getValue())).append("\");\n");
+            }
+            sb.append("        String path = replacePathParameters(\"").append(pathTemplate).append("\", pathParams);\n");
+        } else {
+            sb.append("        String path = \"").append(pathTemplate).append("\";\n");
+        }
+        if (queryParams != null && !queryParams.isEmpty()) {
+            sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
+            for (Map.Entry<String, String> entry : queryParams.entrySet()) {
+                sb.append("        queryParams.put(\"")
+                        .append(entry.getKey()).append("\", \"")
+                        .append(IntegrationScenarioSupport.escapeJavaString(entry.getValue())).append("\");\n");
+            }
+            sb.append("        URI uri = buildUri(path, queryParams);\n");
+        } else {
+            sb.append("        URI uri = URI.create(BASE_URL + path);\n");
+        }
+    }
+
+    private void appendHttpMethodOnRequestBuilder(StringBuilder sb, String methodUpper, boolean jsonBody) {
+        switch (methodUpper) {
+            case "GET":
+                sb.append("        requestBuilder.GET();\n");
+                break;
+            case "POST":
+                sb.append("        requestBuilder.header(\"Content-Type\", \"application/json\");\n");
+                sb.append("        requestBuilder.method(\"POST\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
+                break;
+            case "PUT":
+                sb.append("        requestBuilder.header(\"Content-Type\", \"application/json\");\n");
+                sb.append("        requestBuilder.method(\"PUT\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
+                break;
+            case "PATCH":
+                sb.append("        requestBuilder.header(\"Content-Type\", \"application/json\");\n");
+                sb.append("        requestBuilder.method(\"PATCH\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
+                break;
+            case "DELETE":
+                sb.append("        requestBuilder.DELETE();\n");
+                break;
+            default:
+                sb.append("        requestBuilder.method(\"").append(methodUpper)
+                        .append("\", HttpRequest.BodyPublishers.noBody());\n");
+                break;
+        }
+    }
+
+    private void appendExpectedStatusAssertion(StringBuilder sb, List<Integer> codes) {
+        if (codes == null || codes.isEmpty()) {
+            sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422,\n");
+            sb.append("            \"Expected 400 or 422, got: \" + response.statusCode());\n");
+            return;
+        }
+        if (codes.size() == 1) {
+            sb.append("        assertEquals(").append(codes.get(0)).append(", response.statusCode());\n");
+            return;
+        }
+        sb.append("        assertTrue(");
+        for (int i = 0; i < codes.size(); i++) {
+            if (i > 0) {
+                sb.append(" || ");
+            }
+            sb.append("response.statusCode() == ").append(codes.get(i));
+        }
+        sb.append(", \"Unexpected status: \" + response.statusCode());\n");
+    }
+
+    private String safeMethodSuffix(String name) {
+        if (name == null || name.isEmpty()) {
+            return "case";
+        }
+        String s = name.replaceAll("[^a-zA-Z0-9]+", "_");
+        if (s.length() > 60) {
+            s = s.substring(0, 60);
+        }
+        return capitalize(toMethodName(s));
+    }
+
+    private String escapeForDisplayName(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /**
@@ -245,341 +367,383 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
         Map<String, Object> operation = opInfo.operation;
         String operationId = (String) operation.get("operationId");
         String summary = (String) operation.get("summary");
-        String method = opInfo.method.toUpperCase();
+        String method = opInfo.method.toUpperCase(Locale.ROOT);
         String path = opInfo.path;
 
-        // Get operation name for test method
         String testMethodName = operationId != null
                 ? toMethodName(operationId)
                 : toMethodName(method + "_" + sanitizePath(path));
 
-        // Extract parameters
         List<Map<String, Object>> parameters = operation.containsKey("parameters")
                 ? Util.asStringObjectMapList(operation.get("parameters"))
                 : new ArrayList<>();
 
-        // Extract responses
         Map<String, Object> responses = operation.containsKey("responses")
                 ? Util.asStringObjectMap(operation.get("responses"))
                 : new HashMap<>();
 
-        // Check for security requirements
         boolean requiresAuth = operation.containsKey("security") &&
-                ((List<?>) operation.get("security")).size() > 0;
+                !((List<?>) operation.get("security")).isEmpty();
 
-        // Test: Successful request
-        sb.append("    @Test\n");
-        sb.append("    @Order(").append(order).append(")\n");
-        sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path).append(" - Successful Request\")\n");
-        sb.append("    void test").append(capitalize(testMethodName)).append("_Success() throws Exception {\n");
-        sb.append("        // Arrange\n");
-
-        // Build path parameters
         Map<String, String> pathParams = new HashMap<>();
         Map<String, String> queryParams = new HashMap<>();
         for (Map<String, Object> param : parameters) {
             String paramName = (String) param.get("name");
             String paramIn = (String) param.get("in");
             if ("path".equals(paramIn)) {
-                String example = getParameterExample(param);
-                pathParams.put(paramName, example);
+                pathParams.put(paramName, IntegrationScenarioSupport.getParameterExample(param));
             } else if ("query".equals(paramIn)) {
-                String example = getParameterExample(param);
-                queryParams.put(paramName, example);
+                queryParams.put(paramName, IntegrationScenarioSupport.getParameterExample(param));
             }
         }
 
-        if (!pathParams.isEmpty()) {
-            sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
-            for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                sb.append("        pathParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-            }
-            sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
-        } else {
-            sb.append("        String path = \"").append(path).append("\";\n");
-        }
+        int maxBody = IntegrationScenarioSupport.maxInvalidBodyFields(config);
+        int maxParam = IntegrationScenarioSupport.maxInvalidParamCases(config);
+        String requestBodyRaw = IntegrationScenarioSupport.generateRequestBodyFromSchemaRaw(operation, spec);
+        String requestBodyEscaped = IntegrationScenarioSupport.escapeJavaString(requestBodyRaw);
+        Map<String, Object> requestBodySchema = IntegrationScenarioSupport.extractRequestBodySchema(operation, spec);
+        boolean jsonBody = "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method);
 
-        if (!queryParams.isEmpty()) {
-            sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
-            for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                sb.append("        queryParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-            }
-            sb.append("        URI uri = buildUri(path, queryParams);\n");
-        } else {
-            sb.append("        URI uri = URI.create(BASE_URL + path);\n");
-        }
-
-        sb.append("        \n");
-        sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
-        sb.append("            .uri(uri)\n");
-        sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-        sb.append("            .header(\"Accept\", \"application/json\");\n");
+        String displayBase = escapeForDisplayName(summary != null ? summary : method + " " + path);
 
         if (requiresAuth) {
-            sb.append("        \n");
-            sb.append("        // Add authentication header\n");
-            sb.append("        String token = getAuthToken();\n");
-            sb.append("        if (token != null && !token.isEmpty()) {\n");
-            sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
-            sb.append("        }\n");
-        }
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Successful request (client application)\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_Success_ClientApplication() throws Exception {\n");
+            sb.append("        String tok = getTokenClientApplication();\n");
+            sb.append("        Assumptions.assumeTrue(tok != null && !tok.isEmpty(), \"Skip: set INTEGRATION_TOKEN_CLIENT_APPLICATION (or API_BEARER_TOKEN / API_TOKEN)\");\n");
+            appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\")\n");
+            sb.append("            .header(\"Authorization\", \"Bearer \" + tok);\n");
+            if (jsonBody) {
+                sb.append("        String requestBody = \"").append(requestBodyEscaped).append("\";\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, jsonBody);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            appendSuccessStatusAssertions(sb, responses);
+            sb.append("        assertNotNull(response.body());\n");
+            sb.append("        // Validate response against schema\n");
+            generateResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
 
-        if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
-            sb.append("        \n");
-            sb.append("        // Set request body from schema\n");
-            String requestBodyJson = generateRequestBodyFromSchema(operation, spec);
-            sb.append("        String requestBody = \"").append(escapeJavaString(requestBodyJson)).append("\";\n");
-            sb.append("        requestBuilder.header(\"Content-Type\", \"application/json\");\n");
-            sb.append("        requestBuilder.method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Successful request (authenticated customer)\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_Success_AuthenticatedCustomer() throws Exception {\n");
+            sb.append("        String tok = getTokenAuthenticatedCustomer();\n");
+            sb.append("        Assumptions.assumeTrue(tok != null && !tok.isEmpty(), \"Skip: set INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER\");\n");
+            appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\")\n");
+            sb.append("            .header(\"Authorization\", \"Bearer \" + tok);\n");
+            if (jsonBody) {
+                sb.append("        String requestBody = \"").append(requestBodyEscaped).append("\";\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, jsonBody);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            appendSuccessStatusAssertions(sb, responses);
+            sb.append("        assertNotNull(response.body());\n");
+            sb.append("        // Validate response against schema\n");
+            generateResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
         } else {
-            sb.append("        requestBuilder.GET();\n");
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Successful Request\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_Success() throws Exception {\n");
+            appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\");\n");
+            if (jsonBody) {
+                sb.append("        String requestBody = \"").append(requestBodyEscaped).append("\";\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, jsonBody);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            appendSuccessStatusAssertions(sb, responses);
+            sb.append("        assertNotNull(response.body());\n");
+            sb.append("        // Validate response against schema\n");
+            generateResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
         }
 
-        sb.append("        \n");
-        sb.append("        HttpRequest request = requestBuilder.build();\n\n");
+        List<IntegrationScenarioSupport.IntegrationParamNegativeCase> paramCases =
+                IntegrationScenarioSupport.buildParamNegativeCases(path, operation, pathParams, queryParams, maxParam);
+        for (IntegrationScenarioSupport.IntegrationParamNegativeCase nc : paramCases) {
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Param negative: ")
+                    .append(escapeForDisplayName(nc.name)).append("\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_ParamNegative_")
+                    .append(safeMethodSuffix(nc.name)).append("() throws Exception {\n");
+            appendJavaPathUriBlocks(sb, path, nc.pathParams, nc.queryParams);
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\");\n");
+            if (requiresAuth) {
+                sb.append("        String token = getPreferredAuthToken();\n");
+                sb.append("        if (token != null && !token.isEmpty()) {\n");
+                sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
+                sb.append("        }\n");
+            }
+            if (jsonBody) {
+                sb.append("        String requestBody = \"").append(requestBodyEscaped).append("\";\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, jsonBody);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            appendExpectedStatusAssertion(sb, nc.expectedStatusCodes);
+            generateErrorResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
+        }
 
-        sb.append("        // Act\n");
-        sb.append("        HttpResponse<String> response = sendRequest(request);\n\n");
+        if (requiresAuth) {
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Anonymous customer (no credentials)\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_AnonymousNoCredentials() throws Exception {\n");
+            appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\");\n");
+            if (jsonBody) {
+                sb.append("        String requestBody = \"").append(requestBodyEscaped).append("\";\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, jsonBody);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            sb.append("        assertTrue(response.statusCode() == 401 || response.statusCode() == 403,\n");
+            sb.append("            \"Expected 401/403 for anonymous access, got: \" + response.statusCode());\n");
+            generateErrorResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
+        }
 
-        sb.append("        // Assert\n");
-        sb.append("        assertNotNull(response, \"Response should not be null\");\n");
+        if (jsonBody) {
+            String wrongTypesRaw = IntegrationScenarioSupport.generateWrongTypesBodyRaw(requestBodySchema, spec);
+            String wrongTypesEsc = IntegrationScenarioSupport.escapeJavaString(wrongTypesRaw);
+
+            order++;
+            sb.append("    @Test\n");
+            sb.append("    @Order(").append(order).append(")\n");
+            sb.append("    @DisplayName(\"").append(displayBase).append(" - Invalid Request Body: Wrong Types\")\n");
+            sb.append("    void test").append(capitalize(testMethodName)).append("_InvalidTypes() throws Exception {\n");
+            appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+            sb.append("        String requestBody = \"").append(wrongTypesEsc).append("\";\n");
+            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+            sb.append("            .uri(uri)\n");
+            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+            sb.append("            .header(\"Accept\", \"application/json\");\n");
+            if (requiresAuth) {
+                sb.append("        String token = getPreferredAuthToken();\n");
+                sb.append("        if (token != null && !token.isEmpty()) {\n");
+                sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
+                sb.append("        }\n");
+            }
+            appendHttpMethodOnRequestBuilder(sb, method, true);
+            sb.append("        HttpRequest request = requestBuilder.build();\n");
+            sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+            sb.append("        assertNotNull(response);\n");
+            sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422,\n");
+            sb.append("            \"Expected 400 or 422 for invalid types, got: \" + response.statusCode());\n");
+            generateErrorResponseSchemaValidation(sb, responses, spec);
+            sb.append("    }\n\n");
+
+            List<String> requiredFields = IntegrationScenarioSupport.getRequiredFieldsFromSchema(requestBodySchema);
+            if (!requiredFields.isEmpty()) {
+                String missingRaw = IntegrationScenarioSupport.generateMissingRequiredFieldsBodyRaw(requestBodySchema, spec);
+                String missingEsc = IntegrationScenarioSupport.escapeJavaString(missingRaw);
+                order++;
+                sb.append("    @Test\n");
+                sb.append("    @Order(").append(order).append(")\n");
+                sb.append("    @DisplayName(\"").append(displayBase).append(" - Invalid Request Body: Missing Required Fields\")\n");
+                sb.append("    void test").append(capitalize(testMethodName)).append("_MissingRequiredFields() throws Exception {\n");
+                appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+                sb.append("        String requestBody = \"").append(missingEsc).append("\";\n");
+                sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+                sb.append("            .uri(uri)\n");
+                sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+                sb.append("            .header(\"Accept\", \"application/json\");\n");
+                if (requiresAuth) {
+                    sb.append("        String token = getPreferredAuthToken();\n");
+                    sb.append("        if (token != null && !token.isEmpty()) {\n");
+                    sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
+                    sb.append("        }\n");
+                }
+                appendHttpMethodOnRequestBuilder(sb, method, true);
+                sb.append("        HttpRequest request = requestBuilder.build();\n");
+                sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+                sb.append("        assertNotNull(response);\n");
+                sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422,\n");
+                sb.append("            \"Expected 400 or 422 for missing required fields, got: \" + response.statusCode());\n");
+                generateErrorResponseSchemaValidation(sb, responses, spec);
+                sb.append("    }\n\n");
+            }
+
+            List<IntegrationScenarioSupport.PerFieldInvalidBody> perField =
+                    IntegrationScenarioSupport.buildPerFieldInvalidBodies(requestBodySchema, spec, maxBody);
+            for (IntegrationScenarioSupport.PerFieldInvalidBody pf : perField) {
+                order++;
+                sb.append("    @Test\n");
+                sb.append("    @Order(").append(order).append(")\n");
+                sb.append("    @DisplayName(\"").append(displayBase).append(" - Invalid field: ")
+                        .append(escapeForDisplayName(pf.fieldName)).append("\")\n");
+                sb.append("    void test").append(capitalize(testMethodName)).append("_InvalidBodyField_")
+                        .append(safeMethodSuffix(pf.fieldName)).append("() throws Exception {\n");
+                appendJavaPathUriBlocks(sb, path, pathParams, queryParams);
+                sb.append("        String requestBody = \"").append(IntegrationScenarioSupport.escapeJavaString(pf.invalidJsonBody)).append("\";\n");
+                sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
+                sb.append("            .uri(uri)\n");
+                sb.append("            .timeout(REQUEST_TIMEOUT)\n");
+                sb.append("            .header(\"Accept\", \"application/json\");\n");
+                if (requiresAuth) {
+                    sb.append("        String token = getPreferredAuthToken();\n");
+                    sb.append("        if (token != null && !token.isEmpty()) {\n");
+                    sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
+                    sb.append("        }\n");
+                }
+                appendHttpMethodOnRequestBuilder(sb, method, true);
+                sb.append("        HttpRequest request = requestBuilder.build();\n");
+                sb.append("        HttpResponse<String> response = sendRequest(request);\n");
+                sb.append("        assertNotNull(response);\n");
+                sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422,\n");
+                sb.append("            \"Expected 400 or 422 for invalid field, got: \" + response.statusCode());\n");
+                generateErrorResponseSchemaValidation(sb, responses, spec);
+                sb.append("    }\n\n");
+            }
+        }
+    }
+
+    private void appendSuccessStatusAssertions(StringBuilder sb, Map<String, Object> responses) {
         if (responses.containsKey("200")) {
             sb.append("        assertEquals(200, response.statusCode(), \"Expected 200 OK status\");\n");
         } else if (responses.containsKey("201")) {
             sb.append("        assertEquals(201, response.statusCode(), \"Expected 201 Created status\");\n");
         } else {
-            sb.append("        assertTrue(response.statusCode() >= 200 && response.statusCode() < 300, \n");
+            sb.append("        assertTrue(response.statusCode() >= 200 && response.statusCode() < 300,\n");
             sb.append("            \"Expected successful status code, got: \" + response.statusCode());\n");
         }
-        sb.append("        assertNotNull(response.body(), \"Response body should not be null\");\n");
-        sb.append("        \n");
-        sb.append("        // Validate response against schema\n");
-        generateResponseSchemaValidation(sb, responses, spec);
-        sb.append("    }\n\n");
+    }
 
-        // Test: Invalid request (missing required parameters)
-        for (Map<String, Object> param : parameters) {
-            String paramName = (String) param.get("name");
-            Boolean required = param.containsKey("required") ? (Boolean) param.get("required") : false;
-            String paramIn = (String) param.get("in");
-
-            if (required && "query".equals(paramIn)) {
-                order += 1;
-                sb.append("    @Test\n");
-                sb.append("    @Order(").append(order).append(")\n");
-                sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
-                        .append(" - Missing Required Parameter: ").append(paramName).append("\")\n");
-                sb.append("    void test").append(capitalize(testMethodName)).append("_MissingRequiredParam_").append(capitalize(paramName)).append("() throws Exception {\n");
-                sb.append("        // Arrange - Missing required parameter: ").append(paramName).append("\n");
-
-                // Build path without the missing query parameter
-                if (!pathParams.isEmpty()) {
-                    sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
-                    for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                        sb.append("        pathParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-                    }
-                    sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
-                } else {
-                    sb.append("        String path = \"").append(path).append("\";\n");
-                }
-
-                // Build query params without the required one
-                Map<String, String> otherQueryParams = new HashMap<>();
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    if (!entry.getKey().equals(paramName)) {
-                        otherQueryParams.put(entry.getKey(), entry.getValue());
-                    }
-                }
-
-                if (!otherQueryParams.isEmpty()) {
-                    sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
-                    for (Map.Entry<String, String> entry : otherQueryParams.entrySet()) {
-                        sb.append("        queryParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-                    }
-                    sb.append("        URI uri = buildUri(path, queryParams);\n");
-                } else {
-                    sb.append("        URI uri = URI.create(BASE_URL + path);\n");
-                }
-
-                sb.append("        \n");
-                sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-                sb.append("            .uri(uri)\n");
-                sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-                sb.append("            .GET()\n");
-                sb.append("            .header(\"Accept\", \"application/json\")\n");
-                sb.append("            .build();\n\n");
-
-                sb.append("        // Act\n");
-                sb.append("        HttpResponse<String> response = sendRequest(request);\n\n");
-
-                sb.append("        // Assert\n");
-                sb.append("        assertEquals(400, response.statusCode(), \n");
-                sb.append("            \"Expected 400 Bad Request for missing required parameter: ").append(paramName).append("\");\n");
-                sb.append("    }\n\n");
+    @SuppressWarnings("unchecked")
+    private void generateErrorResponseSchemaValidation(StringBuilder sb, Map<String, Object> responses, Map<String, Object> spec) {
+        Map<String, Object> schema = null;
+        for (String code : new String[]{"422", "400", "401", "403", "404"}) {
+            schema = IntegrationScenarioSupport.resolveResponseSchema(code, responses, spec);
+            if (schema != null) {
+                break;
             }
         }
-
-        // Test: Unauthorized access (if security is required)
-        if (requiresAuth) {
-            order += 1;
-            sb.append("    @Test\n");
-            sb.append("    @Order(").append(order).append(")\n");
-            sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path).append(" - Unauthorized Access\")\n");
-            sb.append("    void test").append(capitalize(testMethodName)).append("_Unauthorized() throws Exception {\n");
-            sb.append("        // Arrange - Request without authentication\n");
-
-            if (!pathParams.isEmpty()) {
-                sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
-                for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                    sb.append("        pathParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-                }
-                sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
-            } else {
-                sb.append("        String path = \"").append(path).append("\";\n");
-            }
-
-            if (!queryParams.isEmpty()) {
-                sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    sb.append("        queryParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-                }
-                sb.append("        URI uri = buildUri(path, queryParams);\n");
-            } else {
-                sb.append("        URI uri = URI.create(BASE_URL + path);\n");
-            }
-
-            sb.append("        \n");
-            sb.append("        HttpRequest request = HttpRequest.newBuilder()\n");
-            sb.append("            .uri(uri)\n");
-            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-            sb.append("            .GET()\n");
-            sb.append("            .header(\"Accept\", \"application/json\")\n");
-            sb.append("            // Intentionally omitting Authorization header\n");
-            sb.append("            .build();\n\n");
-
-            sb.append("        // Act\n");
-            sb.append("        HttpResponse<String> response = sendRequest(request);\n\n");
-
-            sb.append("        // Assert\n");
-            sb.append("        assertEquals(401, response.statusCode(), \n");
-            sb.append("            \"Expected 401 Unauthorized for request without authentication\");\n");
-            sb.append("    }\n\n");
+        sb.append("        // Error response structure (when body is JSON)\n");
+        if (schema != null) {
+            appendSchemaAssertionsForBodyVar(sb, schema, spec, "response.body()", true);
+        } else {
+            sb.append("        String errBody = response.body();\n");
+            sb.append("        if (errBody != null && !errBody.isBlank()) {\n");
+            sb.append("            String et = errBody.trim();\n");
+            sb.append("            assertTrue(et.startsWith(\"{\"),\n");
+            sb.append("                \"Error body should be a JSON object when present, got: \" + et.substring(0, Math.min(80, et.length())));\n");
+            sb.append("        }\n");
         }
+    }
 
-        // Negative test cases for POST/PUT/PATCH: invalid request bodies
-        if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
-            Map<String, Object> requestBodySchema = extractRequestBodySchema(opInfo.operation, spec);
+    /**
+     * Append JSON shape assertions for a schema; {@code bodyExpr} is a Java expression (e.g. response.body()).
+     */
+    @SuppressWarnings("unchecked")
+    private void appendSchemaAssertionsForBodyVar(StringBuilder sb, Map<String, Object> schema, Map<String, Object> spec,
+                                                String bodyExpr, boolean errorContext) {
+        if (schema == null) {
+            return;
+        }
+        if (schema.containsKey("$ref")) {
+            Map<String, Object> resolved = IntegrationScenarioSupport.resolveRef((String) schema.get("$ref"), spec);
+            if (resolved != null) {
+                schema = resolved;
+            }
+        }
+        sb.append("        String responseBody = ").append(bodyExpr).append(";\n");
+        sb.append("        assertDoesNotThrow(() -> {\n");
+        sb.append("            String trimmed = responseBody != null ? responseBody.trim() : \"\";\n");
+        sb.append("            assertTrue(trimmed.startsWith(\"{\") || trimmed.startsWith(\"[\"),\n");
+        sb.append("                \"Response should be valid JSON, got: \" + trimmed.substring(0, Math.min(50, trimmed.length())));\n");
+        sb.append("        }, \"Response body should be valid JSON\");\n");
 
-            // Test: wrong types in request body
-            order += 1;
-            sb.append("    @Test\n");
-            sb.append("    @Order(").append(order).append(")\n");
-            sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
-                    .append(" - Invalid Request Body: Wrong Types\")\n");
-            sb.append("    void test").append(capitalize(testMethodName)).append("_InvalidTypes() throws Exception {\n");
-            sb.append("        // Arrange - Send request body with wrong field types\n");
+        String type = (String) schema.get("type");
+        Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
+        List<String> required = schema.containsKey("required") ? Util.asStringList(schema.get("required")) : null;
 
-            if (!pathParams.isEmpty()) {
-                sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
-                for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                    sb.append("        pathParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
+        if ("object".equals(type) && properties != null && !properties.isEmpty()) {
+            if (required != null && !required.isEmpty()) {
+                sb.append("        // Required fields in ").append(errorContext ? "error " : "").append("response\n");
+                for (String field : required) {
+                    sb.append("        assertTrue(responseBody.contains(\"\\\"").append(field).append("\\\"\"),\n");
+                    sb.append("            \"Response should contain field '").append(field).append("'\");\n");
                 }
-                sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
-            } else {
-                sb.append("        String path = \"").append(path).append("\";\n");
             }
-
-            if (!queryParams.isEmpty()) {
-                sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    sb.append("        queryParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
+            sb.append("        // Field types (heuristic)\n");
+            for (Map.Entry<String, Object> propEntry : properties.entrySet()) {
+                Map<String, Object> propSchema = Util.asStringObjectMap(propEntry.getValue());
+                if (propSchema == null) {
+                    continue;
                 }
-                sb.append("        URI uri = buildUri(path, queryParams);\n");
-            } else {
-                sb.append("        URI uri = URI.create(BASE_URL + path);\n");
-            }
-
-            String wrongTypesBody = generateWrongTypesRequestBody(requestBodySchema);
-            sb.append("        String requestBody = \"").append(escapeJavaString(wrongTypesBody)).append("\";\n");
-            sb.append("        \n");
-            sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
-            sb.append("            .uri(uri)\n");
-            sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-            sb.append("            .header(\"Accept\", \"application/json\")\n");
-            sb.append("            .header(\"Content-Type\", \"application/json\");\n");
-
-            if (requiresAuth) {
-                sb.append("        String token = getAuthToken();\n");
-                sb.append("        if (token != null && !token.isEmpty()) {\n");
-                sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
-                sb.append("        }\n");
-            }
-
-            sb.append("        requestBuilder.method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
-            sb.append("        HttpRequest request = requestBuilder.build();\n\n");
-            sb.append("        // Act\n");
-            sb.append("        HttpResponse<String> response = sendRequest(request);\n\n");
-            sb.append("        // Assert - Expect 400 or 422 for invalid types\n");
-            sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422, \n");
-            sb.append("            \"Expected 400 or 422 for invalid request body types, got: \" + response.statusCode());\n");
-            sb.append("    }\n\n");
-
-            // Test: missing required fields
-            List<String> requiredFields = getRequiredFieldsFromSchema(requestBodySchema);
-            if (!requiredFields.isEmpty()) {
-                order += 1;
-                sb.append("    @Test\n");
-                sb.append("    @Order(").append(order).append(")\n");
-                sb.append("    @DisplayName(\"").append(summary != null ? summary : method + " " + path)
-                        .append(" - Invalid Request Body: Missing Required Fields\")\n");
-                sb.append("    void test").append(capitalize(testMethodName)).append("_MissingRequiredFields() throws Exception {\n");
-                sb.append("        // Arrange - Send request body missing required fields: ").append(String.join(", ", requiredFields)).append("\n");
-
-                if (!pathParams.isEmpty()) {
-                    sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
-                    for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                        sb.append("        pathParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
+                if (propSchema.containsKey("$ref")) {
+                    Map<String, Object> resolved = IntegrationScenarioSupport.resolveRef((String) propSchema.get("$ref"), spec);
+                    if (resolved != null) {
+                        propSchema = resolved;
                     }
-                    sb.append("        String path = replacePathParameters(\"").append(path).append("\", pathParams);\n");
-                } else {
-                    sb.append("        String path = \"").append(path).append("\";\n");
                 }
-
-                if (!queryParams.isEmpty()) {
-                    sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
-                    for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                        sb.append("        queryParams.put(\"").append(entry.getKey()).append("\", \"").append(entry.getValue()).append("\");\n");
-                    }
-                    sb.append("        URI uri = buildUri(path, queryParams);\n");
-                } else {
-                    sb.append("        URI uri = URI.create(BASE_URL + path);\n");
-                }
-
-                String missingFieldsBody = generateMissingRequiredFieldsBody(requestBodySchema);
-                sb.append("        String requestBody = \"").append(escapeJavaString(missingFieldsBody)).append("\";\n");
-                sb.append("        \n");
-                sb.append("        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()\n");
-                sb.append("            .uri(uri)\n");
-                sb.append("            .timeout(REQUEST_TIMEOUT)\n");
-                sb.append("            .header(\"Accept\", \"application/json\")\n");
-                sb.append("            .header(\"Content-Type\", \"application/json\");\n");
-
-                if (requiresAuth) {
-                    sb.append("        String token = getAuthToken();\n");
-                    sb.append("        if (token != null && !token.isEmpty()) {\n");
-                    sb.append("            requestBuilder.header(\"Authorization\", \"Bearer \" + token);\n");
+                String propType = (String) propSchema.get("type");
+                String fieldName = propEntry.getKey();
+                if ("integer".equals(propType) || "number".equals(propType)) {
+                    sb.append("        if (responseBody.contains(\"\\\"").append(fieldName).append("\\\"\")) {\n");
+                    sb.append("            int idx = responseBody.indexOf(\"\\\"").append(fieldName).append("\\\"\");\n");
+                    sb.append("            if (idx >= 0) {\n");
+                    sb.append("                int colonIdx = responseBody.indexOf(':', idx);\n");
+                    sb.append("                if (colonIdx >= 0) {\n");
+                    sb.append("                    String afterColon = responseBody.substring(colonIdx + 1).trim();\n");
+                    sb.append("                    assertFalse(afterColon.startsWith(\"\\\"\"),\n");
+                    sb.append("                        \"Field '").append(fieldName).append("' should be numeric if present\");\n");
+                    sb.append("                }\n");
+                    sb.append("            }\n");
+                    sb.append("        }\n");
+                } else if ("boolean".equals(propType)) {
+                    sb.append("        if (responseBody.contains(\"\\\"").append(fieldName).append("\\\"\")) {\n");
+                    sb.append("            int idx = responseBody.indexOf(\"\\\"").append(fieldName).append("\\\"\");\n");
+                    sb.append("            if (idx >= 0) {\n");
+                    sb.append("                int colonIdx = responseBody.indexOf(':', idx);\n");
+                    sb.append("                if (colonIdx >= 0) {\n");
+                    sb.append("                    String afterColon = responseBody.substring(colonIdx + 1).trim();\n");
+                    sb.append("                    assertTrue(afterColon.startsWith(\"true\") || afterColon.startsWith(\"false\") || afterColon.startsWith(\"null\"),\n");
+                    sb.append("                        \"Field '").append(fieldName).append("' should be boolean\");\n");
+                    sb.append("                }\n");
+                    sb.append("            }\n");
                     sb.append("        }\n");
                 }
-
-                sb.append("        requestBuilder.method(\"").append(method).append("\", HttpRequest.BodyPublishers.ofString(requestBody));\n");
-                sb.append("        HttpRequest request = requestBuilder.build();\n\n");
-                sb.append("        // Act\n");
-                sb.append("        HttpResponse<String> response = sendRequest(request);\n\n");
-                sb.append("        // Assert - Expect 400 or 422 for missing required fields\n");
-                sb.append("        assertTrue(response.statusCode() == 400 || response.statusCode() == 422, \n");
-                sb.append("            \"Expected 400 or 422 for missing required fields, got: \" + response.statusCode());\n");
-                sb.append("    }\n\n");
             }
+        } else if ("array".equals(type)) {
+            sb.append("        assertTrue(responseBody.trim().startsWith(\"[\"), \"Expected JSON array body\");\n");
         }
     }
 
@@ -594,8 +758,16 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
                 "package.name=" + basePackage + "\n\n" +
                 "# Authentication (if required)\n" +
                 "# api.token=${API_TOKEN}\n" +
+                "# API_BEARER_TOKEN (fallback for client-application context)\n" +
                 "# oauth.client.id=${OAUTH_CLIENT_ID}\n" +
-                "# oauth.client.secret=${OAUTH_CLIENT_SECRET}\n";
+                "# oauth.client.secret=${OAUTH_CLIENT_SECRET}\n\n" +
+                "# Multi-context integration tests (Bearer-style APIs)\n" +
+                "# INTEGRATION_TOKEN_CLIENT_APPLICATION — client credentials / app token (falls back to API_BEARER_TOKEN, API_TOKEN)\n" +
+                "# INTEGRATION_TOKEN_AUTHENTICATED_CUSTOMER — end-user / customer session token\n" +
+                "# Anonymous: no env var; tests omit Authorization (expect 401 on secured operations)\n\n" +
+                "# Optional caps (TestConfig additionalProperties when generating tests)\n" +
+                "# integrationMaxInvalidBodyFieldsPerOperation=40\n" +
+                "# integrationMaxInvalidParamCasesPerOperation=25\n";
 
         Files.write(Paths.get(outputDir, "test-config.properties"), configContent.getBytes());
     }
@@ -658,305 +830,59 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
     }
 
     /**
-     * Resolve a $ref reference in the OAS spec (e.g. "#/components/schemas/Pet")
-     */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> resolveRef(String ref, Map<String, Object> spec) {
-        if (ref == null || !ref.startsWith("#/")) {
-            return null;
-        }
-        String[] parts = ref.substring(2).split("/");
-        Object current = spec;
-        for (String part : parts) {
-            if (current instanceof Map) {
-                current = ((Map<String, Object>) current).get(part);
-            } else {
-                return null;
-            }
-        }
-        return current instanceof Map ? (Map<String, Object>) current : null;
-    }
-
-    /**
-     * Extract the request body schema from an operation, resolving $ref if present
-     */
-    private Map<String, Object> extractRequestBodySchema(Map<String, Object> operation, Map<String, Object> spec) {
-        Map<String, Object> requestBody = Util.asStringObjectMap(operation.get("requestBody"));
-        if (requestBody == null) {
-            return new HashMap<>();
-        }
-        // Resolve $ref on requestBody itself
-        if (requestBody.containsKey("$ref")) {
-            requestBody = resolveRef((String) requestBody.get("$ref"), spec);
-            if (requestBody == null) return new HashMap<>();
-        }
-        Map<String, Object> content = Util.asStringObjectMap(requestBody.get("content"));
-        if (content == null) return new HashMap<>();
-
-        Map<String, Object> mediaType = Util.asStringObjectMap(content.get("application/json"));
-        if (mediaType == null) {
-            // Try first available media type
-            for (Object v : content.values()) {
-                mediaType = Util.asStringObjectMap(v);
-                if (mediaType != null) break;
-            }
-        }
-        if (mediaType == null) return new HashMap<>();
-
-        Map<String, Object> schema = Util.asStringObjectMap(mediaType.get("schema"));
-        if (schema == null) return new HashMap<>();
-
-        // Resolve $ref on the schema
-        if (schema.containsKey("$ref")) {
-            Map<String, Object> resolved = resolveRef((String) schema.get("$ref"), spec);
-            if (resolved != null) {
-                schema = resolved;
-            }
-        }
-        return schema;
-    }
-
-    /**
-     * Generate a mock value for a given schema type
-     */
-    private String generateMockValue(String fieldName, String type, String format) {
-        if (type == null) type = "string";
-        switch (type) {
-            case "string":
-                if ("date-time".equals(format)) return "2024-01-15T10:30:00Z";
-                if ("date".equals(format)) return "2024-01-15";
-                if ("email".equals(format)) return "test@example.com";
-                if ("uri".equals(format) || "url".equals(format)) return "https://example.com";
-                if ("uuid".equals(format)) return "550e8400-e29b-41d4-a716-446655440000";
-                if (fieldName != null) {
-                    String lower = fieldName.toLowerCase();
-                    if (lower.contains("name")) return "Test Name";
-                    if (lower.contains("email")) return "test@example.com";
-                    if (lower.contains("phone")) return "+1-555-0100";
-                    if (lower.contains("url") || lower.contains("link")) return "https://example.com";
-                    if (lower.contains("description")) return "Test description";
-                    if (lower.contains("id")) return "test-id-123";
-                    if (lower.contains("status")) return "active";
-                }
-                return "test-string";
-            case "integer":
-                if (fieldName != null && fieldName.toLowerCase().contains("age")) return "25";
-                if (fieldName != null && fieldName.toLowerCase().contains("count")) return "10";
-                return "1";
-            case "number":
-                return "1.5";
-            case "boolean":
-                return "true";
-            default:
-                return "test-value";
-        }
-    }
-
-    /**
-     * Generate a JSON request body string from the operation's request body schema
-     */
-    private String generateRequestBodyFromSchema(Map<String, Object> operation, Map<String, Object> spec) {
-        Map<String, Object> schema = extractRequestBodySchema(operation, spec);
-        return generateJsonFromSchema(schema, spec);
-    }
-
-    /**
-     * Generate a JSON string from a schema definition
-     */
-    @SuppressWarnings("unchecked")
-    private String generateJsonFromSchema(Map<String, Object> schema, Map<String, Object> spec) {
-        if (schema == null || schema.isEmpty()) {
-            return "{}";
-        }
-
-        // Resolve $ref if present
-        if (schema.containsKey("$ref")) {
-            Map<String, Object> resolved = resolveRef((String) schema.get("$ref"), spec);
-            if (resolved != null) {
-                schema = resolved;
-            } else {
-                return "{}";
-            }
-        }
-
-        String type = (String) schema.get("type");
-        if ("array".equals(type)) {
-            Map<String, Object> items = Util.asStringObjectMap(schema.get("items"));
-            if (items != null) {
-                return "[" + generateJsonFromSchema(items, spec) + "]";
-            }
-            return "[]";
-        }
-
-        if (!"object".equals(type) && type != null && !"null".equals(type)) {
-            return generateMockValue(null, type, (String) schema.get("format"));
-        }
-
-        Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-        if (properties == null || properties.isEmpty()) {
-            return "{}";
-        }
-
-        StringBuilder json = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : properties.entrySet()) {
-            if (!first) json.append(", ");
-            first = false;
-
-            String fieldName = entry.getKey();
-            Map<String, Object> propSchema = Util.asStringObjectMap(entry.getValue());
-            if (propSchema == null) continue;
-
-            // Resolve $ref on property
-            if (propSchema.containsKey("$ref")) {
-                Map<String, Object> resolved = resolveRef((String) propSchema.get("$ref"), spec);
-                if (resolved != null) propSchema = resolved;
-            }
-
-            String propType = (String) propSchema.get("type");
-            String propFormat = (String) propSchema.get("format");
-
-            json.append("\\\"").append(fieldName).append("\\\": ");
-
-            if ("object".equals(propType) || propSchema.containsKey("properties")) {
-                json.append(generateJsonFromSchema(propSchema, spec));
-            } else if ("array".equals(propType)) {
-                Map<String, Object> items = Util.asStringObjectMap(propSchema.get("items"));
-                if (items != null) {
-                    json.append("[").append(generateJsonFromSchema(items, spec)).append("]");
-                } else {
-                    json.append("[]");
-                }
-            } else if ("integer".equals(propType) || "number".equals(propType)) {
-                json.append(generateMockValue(fieldName, propType, propFormat));
-            } else if ("boolean".equals(propType)) {
-                json.append(generateMockValue(fieldName, propType, propFormat));
-            } else {
-                json.append("\\\"").append(generateMockValue(fieldName, propType, propFormat)).append("\\\"");
-            }
-        }
-        json.append("}");
-        return json.toString();
-    }
-
-    /**
-     * Escape a string for use inside a Java string literal
-     */
-    private String escapeJavaString(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    /**
-     * Generate response schema validation assertions
+     * Generate response schema validation assertions for first declared 2xx response with JSON schema.
      */
     @SuppressWarnings("unchecked")
     private void generateResponseSchemaValidation(StringBuilder sb, Map<String, Object> responses, Map<String, Object> spec) {
-        // Try 200 first, then 201, then first 2xx
         Map<String, Object> responseObj = null;
         String statusCode = null;
         for (String code : new String[]{"200", "201", "202", "204"}) {
-            if (responses.containsKey(code)) {
+            if (responses != null && responses.containsKey(code)) {
                 responseObj = Util.asStringObjectMap(responses.get(code));
                 statusCode = code;
                 break;
             }
         }
-        if (responseObj == null) return;
-
-        // Resolve $ref on response
+        if (responseObj == null) {
+            return;
+        }
         if (responseObj.containsKey("$ref")) {
-            responseObj = resolveRef((String) responseObj.get("$ref"), spec);
-            if (responseObj == null) return;
+            responseObj = IntegrationScenarioSupport.resolveRef((String) responseObj.get("$ref"), spec);
+            if (responseObj == null) {
+                return;
+            }
         }
-
-        // 204 typically has no body
-        if ("204".equals(statusCode)) return;
-
+        if ("204".equals(statusCode)) {
+            return;
+        }
         Map<String, Object> content = Util.asStringObjectMap(responseObj.get("content"));
-        if (content == null) return;
-
+        if (content == null) {
+            return;
+        }
         Map<String, Object> mediaType = Util.asStringObjectMap(content.get("application/json"));
-        if (mediaType == null) return;
-
+        if (mediaType == null) {
+            for (Object v : content.values()) {
+                mediaType = Util.asStringObjectMap(v);
+                if (mediaType != null) {
+                    break;
+                }
+            }
+        }
+        if (mediaType == null) {
+            return;
+        }
         Map<String, Object> schema = Util.asStringObjectMap(mediaType.get("schema"));
-        if (schema == null) return;
-
-        // Resolve $ref on schema
+        if (schema == null) {
+            return;
+        }
         if (schema.containsKey("$ref")) {
-            Map<String, Object> resolved = resolveRef((String) schema.get("$ref"), spec);
-            if (resolved != null) schema = resolved;
-        }
-
-        sb.append("        // Validate response is valid JSON\n");
-        sb.append("        String responseBody = response.body();\n");
-        sb.append("        assertDoesNotThrow(() -> {\n");
-        sb.append("            // Simple JSON validity check\n");
-        sb.append("            String trimmed = responseBody.trim();\n");
-        sb.append("            assertTrue(trimmed.startsWith(\"{\") || trimmed.startsWith(\"[\"),\n");
-        sb.append("                \"Response should be valid JSON, got: \" + trimmed.substring(0, Math.min(50, trimmed.length())));\n");
-        sb.append("        }, \"Response body should be valid JSON\");\n");
-
-        String type = (String) schema.get("type");
-        Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-        List<String> required = schema.containsKey("required") ? Util.asStringList(schema.get("required")) : null;
-
-        if ("object".equals(type) && properties != null && !properties.isEmpty()) {
-            // Validate required fields are present
-            if (required != null && !required.isEmpty()) {
-                sb.append("        // Validate required fields are present in response\n");
-                for (String field : required) {
-                    sb.append("        assertTrue(responseBody.contains(\"\\\"").append(field).append("\\\"\"),\n");
-                    sb.append("            \"Response should contain required field '").append(field).append("'\");\n");
-                }
+            Map<String, Object> resolved = IntegrationScenarioSupport.resolveRef((String) schema.get("$ref"), spec);
+            if (resolved != null) {
+                schema = resolved;
             }
-
-            // Validate field types for non-string fields
-            sb.append("        // Validate field types in response\n");
-            for (Map.Entry<String, Object> propEntry : properties.entrySet()) {
-                Map<String, Object> propSchema = Util.asStringObjectMap(propEntry.getValue());
-                if (propSchema == null) continue;
-                if (propSchema.containsKey("$ref")) {
-                    Map<String, Object> resolved = resolveRef((String) propSchema.get("$ref"), spec);
-                    if (resolved != null) propSchema = resolved;
-                }
-                String propType = (String) propSchema.get("type");
-                String fieldName = propEntry.getKey();
-
-                if ("integer".equals(propType) || "number".equals(propType)) {
-                    sb.append("        // Field '").append(fieldName).append("' should be a ").append(propType).append(" if present\n");
-                    sb.append("        if (responseBody.contains(\"\\\"").append(fieldName).append("\\\"\")) {\n");
-                    sb.append("            // Numeric field validation: value after key should not be a quoted string\n");
-                    sb.append("            int idx = responseBody.indexOf(\"\\\"").append(fieldName).append("\\\"\");\n");
-                    sb.append("            if (idx >= 0) {\n");
-                    sb.append("                int colonIdx = responseBody.indexOf(':', idx);\n");
-                    sb.append("                if (colonIdx >= 0) {\n");
-                    sb.append("                    String afterColon = responseBody.substring(colonIdx + 1).trim();\n");
-                    sb.append("                    assertFalse(afterColon.startsWith(\"\\\"\"),\n");
-                    sb.append("                        \"Field '").append(fieldName).append("' should be a ").append(propType).append(", not a string\");\n");
-                    sb.append("                }\n");
-                    sb.append("            }\n");
-                    sb.append("        }\n");
-                } else if ("boolean".equals(propType)) {
-                    sb.append("        // Field '").append(fieldName).append("' should be a boolean if present\n");
-                    sb.append("        if (responseBody.contains(\"\\\"").append(fieldName).append("\\\"\")) {\n");
-                    sb.append("            int idx = responseBody.indexOf(\"\\\"").append(fieldName).append("\\\"\");\n");
-                    sb.append("            if (idx >= 0) {\n");
-                    sb.append("                int colonIdx = responseBody.indexOf(':', idx);\n");
-                    sb.append("                if (colonIdx >= 0) {\n");
-                    sb.append("                    String afterColon = responseBody.substring(colonIdx + 1).trim();\n");
-                    sb.append("                    assertTrue(afterColon.startsWith(\"true\") || afterColon.startsWith(\"false\") || afterColon.startsWith(\"null\"),\n");
-                    sb.append("                        \"Field '").append(fieldName).append("' should be a boolean\");\n");
-                    sb.append("                }\n");
-                    sb.append("            }\n");
-                    sb.append("        }\n");
-                }
-            }
-        } else if ("array".equals(type)) {
-            sb.append("        // Validate response is a JSON array\n");
-            sb.append("        assertTrue(responseBody.trim().startsWith(\"[\"),\n");
-            sb.append("            \"Response should be a JSON array\");\n");
         }
+        sb.append("        // Validate response against schema\n");
+        appendSchemaAssertionsForBodyVar(sb, schema, spec, "response.body()", false);
     }
 
     /**
@@ -1120,105 +1046,6 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
         }
     }
 
-    /**
-     * Generate a request body with wrong field types for negative testing
-     */
-    @SuppressWarnings("unchecked")
-    private String generateWrongTypesRequestBody(Map<String, Object> schema) {
-        if (schema == null || schema.isEmpty()) {
-            return "{\\\"invalidField\\\": \\\"not-a-number\\\"}";
-        }
-
-        Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-        if (properties == null || properties.isEmpty()) {
-            return "{\\\"invalidField\\\": \\\"not-a-number\\\"}";
-        }
-
-        StringBuilder json = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : properties.entrySet()) {
-            if (!first) json.append(", ");
-            first = false;
-
-            String fieldName = entry.getKey();
-            Map<String, Object> propSchema = Util.asStringObjectMap(entry.getValue());
-            String propType = propSchema != null ? (String) propSchema.get("type") : "string";
-
-            json.append("\\\"").append(fieldName).append("\\\": ");
-
-            // Generate wrong type value
-            if ("string".equals(propType)) {
-                json.append("12345"); // number instead of string
-            } else if ("integer".equals(propType) || "number".equals(propType)) {
-                json.append("\\\"not-a-number\\\""); // string instead of number
-            } else if ("boolean".equals(propType)) {
-                json.append("\\\"not-a-boolean\\\""); // string instead of boolean
-            } else if ("array".equals(propType)) {
-                json.append("\\\"not-an-array\\\""); // string instead of array
-            } else if ("object".equals(propType)) {
-                json.append("\\\"not-an-object\\\""); // string instead of object
-            } else {
-                json.append("null");
-            }
-        }
-        json.append("}");
-        return json.toString();
-    }
-
-    /**
-     * Get the list of required fields from a schema
-     */
-    private List<String> getRequiredFieldsFromSchema(Map<String, Object> schema) {
-        if (schema == null || !schema.containsKey("required")) {
-            return new ArrayList<>();
-        }
-        List<String> required = Util.asStringList(schema.get("required"));
-        return required != null ? required : new ArrayList<>();
-    }
-
-    /**
-     * Generate a request body with required fields omitted for negative testing
-     */
-    @SuppressWarnings("unchecked")
-    private String generateMissingRequiredFieldsBody(Map<String, Object> schema) {
-        if (schema == null || schema.isEmpty()) {
-            return "{}";
-        }
-
-        List<String> requiredFields = getRequiredFieldsFromSchema(schema);
-        Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-        if (properties == null || properties.isEmpty()) {
-            return "{}";
-        }
-
-        // Build a body with only non-required fields
-        StringBuilder json = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : properties.entrySet()) {
-            String fieldName = entry.getKey();
-            if (requiredFields.contains(fieldName)) {
-                continue; // Skip required fields
-            }
-            if (!first) json.append(", ");
-            first = false;
-
-            Map<String, Object> propSchema = Util.asStringObjectMap(entry.getValue());
-            String propType = propSchema != null ? (String) propSchema.get("type") : "string";
-            String propFormat = propSchema != null ? (String) propSchema.get("format") : null;
-
-            json.append("\\\"").append(fieldName).append("\\\": ");
-            if ("integer".equals(propType) || "number".equals(propType)) {
-                json.append(generateMockValue(fieldName, propType, propFormat));
-            } else if ("boolean".equals(propType)) {
-                json.append(generateMockValue(fieldName, propType, propFormat));
-            } else {
-                json.append("\\\"").append(generateMockValue(fieldName, propType, propFormat)).append("\\\"");
-            }
-        }
-        json.append("}");
-        return json.toString();
-    }
-
     // Helper methods
     private String getAPITitle(Map<String, Object> spec) {
         Map<String, Object> info = Util.asStringObjectMap(spec.get("info"));
@@ -1241,27 +1068,6 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
     private String getOperationTag(Map<String, Object> operation) {
         List<String> tags = Util.asStringList(operation.get("tags"));
         return tags != null && !tags.isEmpty() ? tags.get(0) : "Default";
-    }
-
-    private String getParameterExample(Map<String, Object> param) {
-        if (param.containsKey("example")) {
-            return String.valueOf(param.get("example"));
-        }
-        if (param.containsKey("schema")) {
-            Map<String, Object> schema = Util.asStringObjectMap(param.get("schema"));
-            if (schema.containsKey("example")) {
-                return String.valueOf(schema.get("example"));
-            }
-            String type = (String) schema.get("type");
-            if ("string".equals(type)) {
-                return "test-value";
-            } else if ("integer".equals(type)) {
-                return "123";
-            } else if ("boolean".equals(type)) {
-                return "true";
-            }
-        }
-        return "example";
     }
 
     private String toClassName(String name) {

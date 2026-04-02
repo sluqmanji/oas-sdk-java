@@ -41,6 +41,16 @@ This directory contains examples demonstrating how to use the eGain OAS SDK Java
      ```
      When it works, SDK is under `C:\eGain\published\sdk\`.
 
+### **Generate tests for published V4 APIs**
+- **File**: `egain/oassdk/examples/GeneratePublishedV4Tests.java`
+- **Description**: Finds every `v4/api.yaml` under the published root, uses `GeneratorConfig.searchPaths` so `$ref` to `models/` and sibling files resolve, and writes Java tests (unit, integration, NFR, performance, security, Postman, mock data) into `generated-tests` next to each spec (for example `core/usermgr/v4/generated-tests/`).
+- **Configuration**: System property `oas.published.root` or environment variable `OAS_PUBLISHED_ROOT` (default: `C:\eGain\published`).
+- **How to run**:
+  1. From repo root: `mvn clean package -DskipTests` (compiles nested examples via `build-helper-maven-plugin`).
+  2. `mvn exec:java` (uses `exec-maven-plugin` with main class `egain.oassdk.examples.GeneratePublishedV4Tests`), or run that class from the IDE with the project classpath.
+  3. Optional: pass `--fail-fast` as the first program argument to stop on the first error.
+  4. Alternatively, after package: `java -cp target/oas-sdk-java-2.1-SNAPSHOT.jar egain.oassdk.examples.GeneratePublishedV4Tests` (use the actual versioned JAR name from `target/`).
+
 ## 🚀 Quick Start
 
 ### **1. Basic Usage**
