@@ -52,28 +52,21 @@ public class PostmanTestGeneratorTest {
             objectMapper.readValue(collectionFile.toFile(), Map.class)
         );
         
-        // Verify description is escaped (check in request items)
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) collection.get("item");
         assertNotNull(items, "Collection should have items");
-        
+
         boolean foundEscapedDescription = false;
-        for (Map<String, Object> item : items) {
-            if (item.containsKey("item")) {
+        for (Map<String, Object> tagFolder : items) {
+            for (Map<String, Object> node : flattenPostmanItems(tagFolder)) {
                 @SuppressWarnings("unchecked")
-                List<Map<String, Object>> folderItems = (List<Map<String, Object>>) item.get("item");
-                for (Map<String, Object> request : folderItems) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> requestMap = (Map<String, Object>) request.get("request");
-                    if (requestMap != null && requestMap.containsKey("description")) {
-                        String description = (String) requestMap.get("description");
-                        // Description should contain \n (escaped newline) not actual newlines
-                        if (description != null && description.contains("\\n")) {
-                            foundEscapedDescription = true;
-                            // Should not contain unescaped newlines
-                            assertFalse(description.contains("\n"), 
+                Map<String, Object> requestMap = (Map<String, Object>) node.get("request");
+                if (requestMap != null && requestMap.containsKey("description")) {
+                    String description = (String) requestMap.get("description");
+                    if (description != null && description.contains("\\n")) {
+                        foundEscapedDescription = true;
+                        assertFalse(description.contains("\n"),
                                 "Description should not contain unescaped newlines");
-                        }
                     }
                 }
             }
@@ -217,6 +210,82 @@ public class PostmanTestGeneratorTest {
     }
     
     @Test
+    @DisplayName("openapi4: path uses Postman {{variables}} and Negative-TCs include error body checks")
+    void testOpenApi4NegativeSuiteStructure() throws Exception {
+        String yamlFile = "src/test/resources/openapi4.yaml";
+        Path yamlPath = Paths.get(yamlFile);
+        if (!Files.exists(yamlPath)) {
+            return;
+        }
+        Map<String, Object> spec = parser.parse(yamlFile);
+        Path tempDir = Files.createTempDirectory("postman-test");
+        generator.generate(spec, tempDir.toString(), new TestConfig(), null);
+
+        Path collectionFile = findPostmanCollectionFile(tempDir);
+        assertNotNull(collectionFile);
+        String json = Files.readString(collectionFile);
+
+        assertTrue(json.contains("{{contentId}}"), "Path should use Postman variable for contentId");
+        assertTrue(json.contains("Negative-TCs"), "Collection should include Negative-TCs folder");
+        assertTrue(json.contains("developerMessage"), "Negative tests should assert developerMessage");
+        assertTrue(json.contains("Happy path"), "Operation folder should include Happy path request");
+
+        assertTrue(findNegativeTcFolderCount(Util.asStringObjectMap(
+                objectMapper.readValue(collectionFile.toFile(), Map.class))) >= 1);
+
+        deleteDirectory(tempDir);
+    }
+
+    @Test
+    @DisplayName("postmanNegativeTests false skips Negative-TCs")
+    void testDisableNegativeTestsViaConfig() throws Exception {
+        String yamlFile = "src/test/resources/openapi4.yaml";
+        Path yamlPath = Paths.get(yamlFile);
+        if (!Files.exists(yamlPath)) {
+            return;
+        }
+        Map<String, Object> spec = parser.parse(yamlFile);
+        Path tempDir = Files.createTempDirectory("postman-test");
+        TestConfig cfg = new TestConfig();
+        Map<String, Object> props = new HashMap<>();
+        props.put("postmanNegativeTests", Boolean.FALSE);
+        cfg.setAdditionalProperties(props);
+        generator.generate(spec, tempDir.toString(), cfg, null);
+
+        String json = Files.readString(findPostmanCollectionFile(tempDir));
+        assertFalse(json.contains("Negative-TCs"));
+
+        deleteDirectory(tempDir);
+    }
+
+    @SuppressWarnings("unchecked")
+    private int findNegativeTcFolderCount(Map<String, Object> collection) {
+        int count = 0;
+        List<Map<String, Object>> tags = (List<Map<String, Object>>) collection.get("item");
+        if (tags == null) {
+            return 0;
+        }
+        for (Map<String, Object> tag : tags) {
+            List<Map<String, Object>> ops = (List<Map<String, Object>>) tag.get("item");
+            if (ops == null) {
+                continue;
+            }
+            for (Map<String, Object> opFolder : ops) {
+                List<Map<String, Object>> children = (List<Map<String, Object>>) opFolder.get("item");
+                if (children == null) {
+                    continue;
+                }
+                for (Map<String, Object> child : children) {
+                    if ("Negative-TCs".equals(child.get("name"))) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    @Test
     @DisplayName("Test with openapi3.yaml file")
     void testWithOpenAPI3File() throws Exception {
         String yamlFile = "src/test/resources/openapi3.yaml";
@@ -345,6 +414,30 @@ public class PostmanTestGeneratorTest {
         return spec;
     }
     
+    /**
+     * Depth-first walk of Postman folder items; returns leaf items that may have a {@code request} map.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> flattenPostmanItems(Map<String, Object> folderOrItem) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (folderOrItem == null) {
+            return out;
+        }
+        if (folderOrItem.containsKey("request")) {
+            out.add(folderOrItem);
+            return out;
+        }
+        if (folderOrItem.containsKey("item")) {
+            List<Map<String, Object>> children = (List<Map<String, Object>>) folderOrItem.get("item");
+            if (children != null) {
+                for (Map<String, Object> child : children) {
+                    out.addAll(flattenPostmanItems(child));
+                }
+            }
+        }
+        return out;
+    }
+
     private Path findPostmanCollectionFile(Path dir) throws IOException {
         try (var stream = Files.list(dir)) {
             return stream

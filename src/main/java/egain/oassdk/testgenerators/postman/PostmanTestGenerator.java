@@ -16,7 +16,13 @@ import java.nio.file.Paths;
 import java.util.*;
 
 /**
- * Postman collection generator
+ * Postman collection generator.
+ * <p>Optional {@link TestConfig#getAdditionalProperties()} keys:
+ * <ul>
+ *   <li>{@code postmanNegativeTests} (Boolean, default {@code true}) — emit Negative-TCs folders</li>
+ *   <li>{@code postmanNegativeTestsMaxPerOperation} (Number, default {@code 50}) — cap negative cases per operation</li>
+ *   <li>{@code postmanAssertErrorExamples} (Boolean, default {@code false}) — assert {@code code} matches 4xx response examples when present</li>
+ * </ul>
  */
 public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGenerator {
 
@@ -165,7 +171,7 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
     }
 
     /**
-     * Group operations by tag
+     * Group operations by tag (each operation is a folder: happy path + optional Negative-TCs).
      */
     private Map<String, List<Map<String, Object>>> groupOperationsByTag(Map<String, Object> pathItem, String path) {
         Map<String, List<Map<String, Object>>> taggedOperations = new HashMap<>();
@@ -174,44 +180,136 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
         for (String method : methods) {
             if (pathItem.containsKey(method)) {
                 Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
-                if (operation == null) continue;
+                if (operation == null) {
+                    continue;
+                }
 
                 String tag = getOperationTag(operation);
-                Map<String, Object> request = generatePostmanRequest(method, path, operation);
-
-                taggedOperations.computeIfAbsent(tag, k -> new ArrayList<>()).add(request);
+                Map<String, Object> opFolder = buildOperationFolder(method, path, operation);
+                taggedOperations.computeIfAbsent(tag, k -> new ArrayList<>()).add(opFolder);
             }
         }
 
         return taggedOperations;
     }
 
-    /**
-     * Generate Postman request
-     */
-    private Map<String, Object> generatePostmanRequest(String method, String path, Map<String, Object> operation) {
+    private boolean isPostmanNegativeTestsEnabled() {
+        if (config == null || config.getAdditionalProperties() == null) {
+            return true;
+        }
+        Object v = config.getAdditionalProperties().get("postmanNegativeTests");
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        return true;
+    }
+
+    private int postmanNegativeTestsMaxPerOperation() {
+        if (config == null || config.getAdditionalProperties() == null) {
+            return 50;
+        }
+        Object v = config.getAdditionalProperties().get("postmanNegativeTestsMaxPerOperation");
+        if (v instanceof Number n) {
+            return Math.max(0, n.intValue());
+        }
+        return 50;
+    }
+
+    private boolean isPostmanAssertErrorExamples() {
+        if (config == null || config.getAdditionalProperties() == null) {
+            return false;
+        }
+        return Boolean.TRUE.equals(config.getAdditionalProperties().get("postmanAssertErrorExamples"));
+    }
+
+    private Map<String, Object> buildOperationFolder(String method, String path, Map<String, Object> operation) {
         String operationId = (String) operation.get("operationId");
         String summary = (String) operation.get("summary");
-        String description = (String) operation.get("description");
+        String opName = summary != null ? summary : operationId != null ? operationId : method.toUpperCase() + " " + path;
 
-        // Escape newlines in description for Postman JSON format
+        Map<String, Object> folder = new HashMap<>();
+        folder.put("name", opName);
+
+        List<Map<String, Object>> children = new ArrayList<>();
+        children.add(buildHappyPathItem(method, path, operation));
+
+        if (isPostmanNegativeTestsEnabled()) {
+            int maxNeg = postmanNegativeTestsMaxPerOperation();
+            List<Map<String, Object>> positiveQuery = PostmanParameterSupport.buildPositiveQueryList(operation);
+            int default4xx = preferred4xxStatus(operation);
+            List<PostmanNegativeRequestFactory.NegativeCase> negatives = PostmanNegativeRequestFactory.buildCases(
+                    path, operation, positiveQuery, maxNeg, default4xx);
+            if (!negatives.isEmpty()) {
+                Map<String, Object> negFolder = new HashMap<>();
+                negFolder.put("name", "Negative-TCs");
+                List<Map<String, Object>> negItems = new ArrayList<>();
+                for (PostmanNegativeRequestFactory.NegativeCase nc : negatives) {
+                    negItems.add(buildNegativeRequestItem(method, path, operation, nc, default4xx));
+                }
+                negFolder.put("item", negItems);
+                children.add(negFolder);
+            }
+        }
+
+        folder.put("item", children);
+        return folder;
+    }
+
+    private Map<String, Object> buildHappyPathItem(String method, String path, Map<String, Object> operation) {
+        String description = (String) operation.get("description");
         String escapedDescription = escapeStringForJson(description != null ? description : "");
 
-        Map<String, Object> request = new HashMap<>();
-        request.put("name", summary != null ? summary : operationId != null ? operationId : method.toUpperCase() + " " + path);
+        Map<String, Object> item = new HashMap<>();
+        item.put("name", "Happy path");
 
         Map<String, Object> requestMap = new HashMap<>();
         requestMap.put("method", method.toUpperCase());
         requestMap.put("header", generateHeaders(operation));
-        requestMap.put("url", generateUrl(path, operation));
+        requestMap.put("url", buildHappyPathUrl(path, operation));
         requestMap.put("body", generateBody(operation));
         requestMap.put("description", escapedDescription);
-        request.put("request", requestMap);
+        item.put("request", requestMap);
 
-        // Add tests
-        request.put("event", generateTests(operation));
+        item.put("event", generateHappyPathTests(operation));
+        return item;
+    }
 
-        return request;
+    private Map<String, Object> buildNegativeRequestItem(String method,
+                                                         String path,
+                                                         Map<String, Object> operation,
+                                                         PostmanNegativeRequestFactory.NegativeCase nc,
+                                                         int default4xx) {
+        String description = (String) operation.get("description");
+        String escapedDescription = escapeStringForJson(description != null ? description : "");
+
+        Map<String, Object> item = new HashMap<>();
+        item.put("name", nc.name);
+
+        Map<String, String> resolvedPath = new LinkedHashMap<>();
+        for (String pn : PostmanParameterSupport.pathParameterNames(path)) {
+            resolvedPath.put(pn, nc.pathLiterals.getOrDefault(pn, "{{" + pn + "}}"));
+        }
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("method", method.toUpperCase());
+        requestMap.put("header", generateHeaders(operation));
+        requestMap.put("url", PostmanParameterSupport.buildUrlObject(path, resolvedPath, nc.queryEntries));
+        requestMap.put("body", generateBody(operation));
+        requestMap.put("description", escapedDescription);
+        item.put("request", requestMap);
+
+        int expected = nc.expectedStatusOverride != null ? nc.expectedStatusOverride : default4xx;
+        item.put("event", generateNegativeTests(operation, expected));
+        return item;
+    }
+
+    private Map<String, Object> buildHappyPathUrl(String path, Map<String, Object> operation) {
+        Map<String, String> resolvedPath = new LinkedHashMap<>();
+        for (String pn : PostmanParameterSupport.pathParameterNames(path)) {
+            resolvedPath.put(pn, "{{" + pn + "}}");
+        }
+        List<Map<String, Object>> query = PostmanParameterSupport.buildPositiveQueryList(operation);
+        return PostmanParameterSupport.buildUrlObject(path, resolvedPath, query);
     }
 
     /**
@@ -245,44 +343,6 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
         }
 
         return headers;
-    }
-
-    /**
-     * Generate URL
-     */
-    private Map<String, Object> generateUrl(String path, Map<String, Object> operation) {
-        Map<String, Object> url = new HashMap<>();
-        String safePath = path != null ? path : "";
-        url.put("raw", "{{base_url}}" + safePath);
-        url.put("host", List.of("{{base_url}}"));
-        url.put("path", Arrays.asList(safePath.split("/")));
-
-        // Add query parameters
-        List<Map<String, Object>> queryParams = new ArrayList<>();
-        if (operation.containsKey("parameters")) {
-            List<Map<String, Object>> parameters = Util.asStringObjectMapList(operation.get("parameters"));
-            if (parameters != null) {
-                for (Map<String, Object> param : parameters) {
-                    if (param != null && "query".equals(param.get("in"))) {
-                        Object name = param.get("name");
-                        if (name != null) {
-                            Object description = param.get("description");
-                            queryParams.add(Map.of(
-                                    "key", name.toString(),
-                                    "value", "{{" + name + "}}",
-                                    "description", description != null ? description.toString() : ""
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!queryParams.isEmpty()) {
-            url.put("query", queryParams);
-        }
-
-        return url;
     }
 
     /**
@@ -363,103 +423,258 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
         return "{\n  \"example\": \"value\"\n}";
     }
 
-    /**
-     * Generate tests
-     */
-    private List<Map<String, Object>> generateTests(Map<String, Object> operation) {
+    private List<Map<String, Object>> wrapTestScript(List<String> lines) {
         List<Map<String, Object>> events = new ArrayList<>();
-
         Map<String, Object> testEvent = new HashMap<>();
         testEvent.put("listen", "test");
-
-        List<String> testScript = generateTestScript(operation);
-
         Map<String, Object> scriptMap = new HashMap<>();
         scriptMap.put("type", "text/javascript");
-        scriptMap.put("exec", testScript);
+        scriptMap.put("exec", lines);
         testEvent.put("script", scriptMap);
-
         events.add(testEvent);
         return events;
     }
 
-    /**
-     * Generate test script
-     */
-    private List<String> generateTestScript(Map<String, Object> operation) {
-        List<String> script = new ArrayList<>();
+    private List<Map<String, Object>> generateHappyPathTests(Map<String, Object> operation) {
+        return wrapTestScript(generateHappyPathTestScript(operation, preferred2xxStatus(operation)));
+    }
 
-        script.add("// Test response status");
-        script.add("pm.test(\"Status code is 200\", function () {");
-        script.add("    pm.response.to.have.status(200);");
+    private List<Map<String, Object>> generateNegativeTests(Map<String, Object> operation, int expectedStatus) {
+        return wrapTestScript(generateNegativeTestScript(operation, expectedStatus));
+    }
+
+    private int preferred2xxStatus(Map<String, Object> operation) {
+        Map<String, Object> responses = operation != null ? Util.asStringObjectMap(operation.get("responses")) : null;
+        if (responses == null) {
+            return 200;
+        }
+        for (String code : List.of("200", "201", "202", "204")) {
+            if (responses.containsKey(code)) {
+                return Integer.parseInt(code);
+            }
+        }
+        for (String key : responses.keySet()) {
+            if (key != null && key.matches("\\d{3}")) {
+                int c = Integer.parseInt(key);
+                if (c >= 200 && c < 300) {
+                    return c;
+                }
+            }
+        }
+        return 200;
+    }
+
+    /**
+     * Default HTTP status for parameter-validation negatives: documented {@code 400} or {@code 422},
+     * otherwise {@code 400}. Special cases (e.g. empty path segment) set
+     * {@link PostmanNegativeRequestFactory.NegativeCase#expectedStatusOverride}.
+     */
+    private int preferred4xxStatus(Map<String, Object> operation) {
+        Map<String, Object> responses = operation != null ? Util.asStringObjectMap(operation.get("responses")) : null;
+        if (responses == null) {
+            return 400;
+        }
+        if (responses.containsKey("400")) {
+            return 400;
+        }
+        if (responses.containsKey("422")) {
+            return 422;
+        }
+        return 400;
+    }
+
+    private List<String> generateHappyPathTestScript(Map<String, Object> operation, int successStatus) {
+        List<String> script = new ArrayList<>();
+        script.add("// Happy path — success response");
+        script.add("pm.test(\"Status code is " + successStatus + "\", function () {");
+        script.add("    pm.response.to.have.status(" + successStatus + ");");
         script.add("});");
         script.add("");
-
-        script.add("// Test response time");
         script.add("pm.test(\"Response time is less than 2000ms\", function () {");
         script.add("    pm.expect(pm.response.responseTime).to.be.below(2000);");
         script.add("});");
         script.add("");
-
-        script.add("// Test response headers");
-        script.add("pm.test(\"Content-Type is application/json\", function () {");
-        script.add("    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");");
+        script.add("pm.test(\"Content-Type is JSON\", function () {");
+        script.add("    const ct = pm.response.headers.get(\"Content-Type\") || \"\";");
+        script.add("    pm.expect(ct).to.match(/json/i);");
         script.add("});");
         script.add("");
 
-        // Add response validation if schema is available
-        if (operation.containsKey("responses")) {
+        if (successStatus != 204 && operation.containsKey("responses")) {
             Map<String, Object> responses = Util.asStringObjectMap(operation.get("responses"));
-            if (responses.containsKey("200")) {
-                Map<String, Object> response200 = Util.asStringObjectMap(responses.get("200"));
-                if (response200.containsKey("content")) {
-                    script.add("// Test response body structure");
-                    script.add("pm.test(\"Response has required fields\", function () {");
-                    script.add("    const jsonData = pm.response.json();");
-                    script.add("    // Add specific field validations here");
-                    script.add("});");
-                }
+            Map<String, Object> ok = Util.asStringObjectMap(responses.get(String.valueOf(successStatus)));
+            if (ok != null && ok.containsKey("content")) {
+                script.add("pm.test(\"Response parses as JSON\", function () {");
+                script.add("    pm.response.json();");
+                script.add("});");
             }
         }
 
         return script;
     }
 
-    /**
-     * Generate variables
-     */
-    private List<Map<String, Object>> generateVariables(Map<String, Object> spec) {
-        List<Map<String, Object>> variables = new ArrayList<>();
+    private List<String> generateNegativeTestScript(Map<String, Object> operation, int expectedStatus) {
+        List<String> script = new ArrayList<>();
+        script.add("// Negative case — client or validation error");
+        script.add("pm.test(\"Status code is " + expectedStatus + "\", function () {");
+        script.add("    pm.response.to.have.status(" + expectedStatus + ");");
+        script.add("});");
+        script.add("");
+        script.add("pm.test(\"Content-Type is JSON\", function () {");
+        script.add("    const ct = pm.response.headers.get(\"Content-Type\") || \"\";");
+        script.add("    pm.expect(ct).to.match(/json/i);");
+        script.add("});");
+        script.add("");
+        script.add("pm.test(\"Error body has code and developerMessage\", function () {");
+        script.add("    const json = pm.response.json();");
+        script.add("    pm.expect(json).to.have.property(\"code\");");
+        script.add("    pm.expect(json.code).to.be.a(\"string\");");
+        script.add("    pm.expect(json).to.have.property(\"developerMessage\");");
+        script.add("    pm.expect(json.developerMessage).to.be.a(\"string\");");
+        script.add("});");
+        script.add("");
+        script.add("pm.test(\"Error code matches eGain-style pattern\", function () {");
+        script.add("    const json = pm.response.json();");
+        script.add("    pm.expect(json.code).to.match(/^4\\d{2}-\\d+/);");
+        script.add("});");
 
-        // Add server URLs if available (prefer production server)
-        if (spec.containsKey("servers")) {
-            List<Map<String, Object>> servers = Util.asStringObjectMapList(spec.get("servers"));
-            if (servers != null && !servers.isEmpty()) {
-                Map<String, Object> firstServer = servers.get(0);
-                if (firstServer != null) {
-                    String serverUrl = (String) firstServer.get("url");
-                    if (serverUrl != null) {
-                        variables.add(Map.of(
-                                "key", "base_url",
-                                "value", serverUrl,
-                                "type", "string"
-                        ));
+        if (isPostmanAssertErrorExamples()) {
+            String exampleCode = extractExampleErrorCode(operation, expectedStatus);
+            if (exampleCode != null && !exampleCode.isEmpty()) {
+                script.add("");
+                script.add("pm.test(\"Error code matches spec example\", function () {");
+                script.add("    pm.expect(pm.response.json().code).to.eql(\"" + escapeForJsString(exampleCode) + "\");");
+                script.add("});");
+            }
+        }
+
+        return script;
+    }
+
+    private String escapeForJsString(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractExampleErrorCode(Map<String, Object> operation, int status) {
+        Map<String, Object> responses = Util.asStringObjectMap(operation.get("responses"));
+        if (responses == null) {
+            return null;
+        }
+        Map<String, Object> r = Util.asStringObjectMap(responses.get(String.valueOf(status)));
+        if (r == null) {
+            return null;
+        }
+        Map<String, Object> content = Util.asStringObjectMap(r.get("content"));
+        if (content == null) {
+            return null;
+        }
+        for (String mt : List.of("application/json", "application/problem+json")) {
+            Map<String, Object> media = Util.asStringObjectMap(content.get(mt));
+            if (media == null) {
+                continue;
+            }
+            if (media.containsKey("example")) {
+                Object ex = media.get("example");
+                if (ex instanceof Map) {
+                    Object code = ((Map<String, Object>) ex).get("code");
+                    return code != null ? String.valueOf(code) : null;
+                }
+            }
+            if (media.containsKey("examples")) {
+                Map<String, Object> examples = Util.asStringObjectMap(media.get("examples"));
+                if (examples != null && !examples.isEmpty()) {
+                    Object first = examples.values().iterator().next();
+                    if (first instanceof Map) {
+                        Map<String, Object> exMap = Util.asStringObjectMap(first);
+                        if (exMap != null && exMap.containsKey("value") && exMap.get("value") instanceof Map) {
+                            Object code = ((Map<String, Object>) exMap.get("value")).get("code");
+                            return code != null ? String.valueOf(code) : null;
+                        }
                     }
                 }
             }
         }
+        return null;
+    }
 
-        // If no server URL was added, use fallback
-        if (variables.isEmpty()) {
-            // Fallback to localhost if no servers defined
-            variables.add(Map.of(
-                    "key", "base_url",
-                    "value", "http://localhost:8080",
-                    "type", "string"
-            ));
+    /**
+     * Generate collection / environment variables (base_url + parameter defaults).
+     */
+    private List<Map<String, Object>> generateVariables(Map<String, Object> spec) {
+        List<Map<String, Object>> variables = new ArrayList<>();
+        Map<String, String> paramDefaults = collectParameterVariableDefaults(spec);
+
+        String baseUrl = "http://localhost:8080";
+        if (spec.containsKey("servers")) {
+            List<Map<String, Object>> servers = Util.asStringObjectMapList(spec.get("servers"));
+            if (servers != null && !servers.isEmpty()) {
+                Map<String, Object> firstServer = servers.get(0);
+                if (firstServer != null && firstServer.get("url") != null) {
+                    baseUrl = String.valueOf(firstServer.get("url"));
+                }
+            }
+        }
+
+        variables.add(variableEntry("base_url", baseUrl));
+        for (Map.Entry<String, String> e : paramDefaults.entrySet()) {
+            variables.add(variableEntry(e.getKey(), e.getValue()));
         }
 
         return variables;
+    }
+
+    private Map<String, String> collectParameterVariableDefaults(Map<String, Object> spec) {
+        Map<String, String> defaults = new LinkedHashMap<>();
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths == null) {
+            return defaults;
+        }
+        for (Map.Entry<String, Object> pathEntry : paths.entrySet()) {
+            Map<String, Object> pathItem = Util.asStringObjectMap(pathEntry.getValue());
+            if (pathItem == null) {
+                continue;
+            }
+            for (String method : Constants.HTTP_METHODS) {
+                if (!pathItem.containsKey(method)) {
+                    continue;
+                }
+                Map<String, Object> operation = Util.asStringObjectMap(pathItem.get(method));
+                if (operation == null || !operation.containsKey("parameters")) {
+                    continue;
+                }
+                List<Map<String, Object>> parameters = Util.asStringObjectMapList(operation.get("parameters"));
+                if (parameters == null) {
+                    continue;
+                }
+                for (Map<String, Object> param : parameters) {
+                    if (param == null) {
+                        continue;
+                    }
+                    String in = (String) param.get("in");
+                    if (!"query".equals(in) && !"path".equals(in) && !"header".equals(in)) {
+                        continue;
+                    }
+                    String name = (String) param.get("name");
+                    if (name == null || defaults.containsKey(name)) {
+                        continue;
+                    }
+                    defaults.put(name, PostmanParameterSupport.defaultValueForParameter(param));
+                }
+            }
+        }
+        return defaults;
+    }
+
+    private Map<String, Object> variableEntry(String key, String value) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("key", key);
+        m.put("value", value != null ? value : "");
+        m.put("type", "string");
+        return m;
     }
 
     /**
