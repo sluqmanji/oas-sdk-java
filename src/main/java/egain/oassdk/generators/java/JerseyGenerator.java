@@ -69,6 +69,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             modelGenerator.generateModels(spec, outputDir, packageName);
             this.inlinedSchemas.putAll(ctx.inlinedSchemas);
 
+            if (config != null && config.isAuthorizationDataGenerationEnabled()) {
+                new JerseyAuthorizationDataGenerator().generate(spec, outputDir, config);
+            }
+
             new JerseyQueryParamValidatorGenerator(ctx).generate();
 
             if (!isModelsOnly) {
