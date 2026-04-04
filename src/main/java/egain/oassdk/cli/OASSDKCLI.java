@@ -58,6 +58,9 @@ public class OASSDKCLI implements Callable<Integer> {
         @Option(names = {"--spec-zip"}, description = "Path to ZIP file containing specs; specPath is then an entry path inside the ZIP")
         private String specZipPath;
 
+        @Option(names = {"--authorization-data"}, description = "Generate Java classes from x-egain-authorization-data on component schemas")
+        private boolean authorizationData;
+
         @Override
         public Integer call() {
             try {
@@ -67,7 +70,8 @@ public class OASSDKCLI implements Callable<Integer> {
                         .framework(framework)
                         .packageName(packageName)
                         .outputDir(output)
-                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null);
+                        .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
+                        .authorizationDataGenerationEnabled(authorizationData);
                 if (specZipPath != null && !specZipPath.isEmpty()) {
                     configBuilder.specZipPath(specZipPath);
                 }

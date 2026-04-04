@@ -31,6 +31,12 @@ public class GeneratorConfig {
 
     private boolean modelsOnly; // If true, only generate models and skip executor/resources.
 
+    /** When true, emit Java *AuthorizationData classes from {@code x-egain-authorization-data} on component schemas. */
+    private boolean authorizationDataGenerationEnabled;
+
+    /** Optional FQCN used when a schema extension omits {@code extends}. */
+    private String defaultAuthorizationDataExtends;
+
     // Observability configuration (OpenTelemetry + Micrometer)
     private ObservabilityConfig observabilityConfig;
 
@@ -50,6 +56,8 @@ public class GeneratorConfig {
         this.includeOperations = null;
         this.searchPaths = null;
         this.specZipPath = null;
+        this.authorizationDataGenerationEnabled = false;
+        this.defaultAuthorizationDataExtends = null;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -71,6 +79,8 @@ public class GeneratorConfig {
         this.includeOperations = null;
         this.searchPaths = null;
         this.specZipPath = null;
+        this.authorizationDataGenerationEnabled = false;
+        this.defaultAuthorizationDataExtends = null;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -121,6 +131,22 @@ public class GeneratorConfig {
 
     public void setModelsOnly(boolean modelsOnly) {
         this.modelsOnly = modelsOnly;
+    }
+
+    public boolean isAuthorizationDataGenerationEnabled() {
+        return authorizationDataGenerationEnabled;
+    }
+
+    public void setAuthorizationDataGenerationEnabled(boolean authorizationDataGenerationEnabled) {
+        this.authorizationDataGenerationEnabled = authorizationDataGenerationEnabled;
+    }
+
+    public String getDefaultAuthorizationDataExtends() {
+        return defaultAuthorizationDataExtends;
+    }
+
+    public void setDefaultAuthorizationDataExtends(String defaultAuthorizationDataExtends) {
+        this.defaultAuthorizationDataExtends = defaultAuthorizationDataExtends;
     }
 
     public String getTemplatesDir() {
@@ -223,6 +249,8 @@ public class GeneratorConfig {
         private List<String> searchPaths = null;
         private String specZipPath = null;
         private boolean modelsOnly = false;
+        private boolean authorizationDataGenerationEnabled = false;
+        private String defaultAuthorizationDataExtends = null;
         private ObservabilityConfig observabilityConfig = new ObservabilityConfig();
 
         public Builder language(String language) {
@@ -297,6 +325,16 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder authorizationDataGenerationEnabled(boolean enabled) {
+            this.authorizationDataGenerationEnabled = enabled;
+            return this;
+        }
+
+        public Builder defaultAuthorizationDataExtends(String fqcn) {
+            this.defaultAuthorizationDataExtends = fqcn;
+            return this;
+        }
+
         public Builder observabilityConfig(ObservabilityConfig observabilityConfig) {
             this.observabilityConfig = observabilityConfig;
             return this;
@@ -315,6 +353,8 @@ public class GeneratorConfig {
             config.setSearchPaths(searchPaths);
             config.setSpecZipPath(specZipPath);
             config.setModelsOnly(modelsOnly);
+            config.setAuthorizationDataGenerationEnabled(authorizationDataGenerationEnabled);
+            config.setDefaultAuthorizationDataExtends(defaultAuthorizationDataExtends);
             config.setObservabilityConfig(observabilityConfig);
             return config;
         }
@@ -345,6 +385,8 @@ public class GeneratorConfig {
                 ", searchPaths=" + searchPaths +
                 ", specZipPath=" + specZipPath +
                 ", modelsOnly=" + modelsOnly +
+                ", authorizationDataGenerationEnabled=" + authorizationDataGenerationEnabled +
+                ", defaultAuthorizationDataExtends='" + defaultAuthorizationDataExtends + '\'' +
                 ", observabilityConfig=" + observabilityConfig +
                 '}';
     }
