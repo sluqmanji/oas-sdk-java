@@ -1,6 +1,7 @@
 package egain.oassdk.generators.java;
 
 import egain.oassdk.OASSDK;
+import egain.oassdk.Util;
 import egain.oassdk.core.exceptions.OASSDKException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
@@ -631,5 +632,71 @@ public class JerseyGeneratorExecutorTest {
             
             assertTrue(hasPostExecutor, "Should generate at least one POST executor");
         }
+    }
+
+    @Test
+    @DisplayName("Executor emits spec validation and x-oas-sdk-executor fragments")
+    public void testExecutorSpecValidationAndExtensions() throws OASSDKException, IOException {
+        Path outputDir = tempOutputDir.resolve("executor-validation-sample");
+        String yamlFile = "src/test/resources/executor-validation-sample.yaml";
+        String packageName = "com.test.executorval";
+
+        OASSDK sdk = new OASSDK();
+        sdk.loadSpec(yamlFile);
+        sdk.generateApplication("java", "jersey", packageName, outputDir.toString());
+
+        Path executorFile = outputDir.resolve("src/main/java/com/test/executorval/executor/CreateFolderBOExecutor.java");
+        assertTrue(Files.exists(executorFile), "CreateFolderBOExecutor should be generated");
+        String content = Files.readString(executorFile);
+
+        assertTrue(content.contains("L10N_REQUEST_BODY_NOT_PROVIDED"), "Should guard null request body");
+        assertTrue(content.contains("L10N_MUTUALLY_EXCLUSIVE_ATTRIBUTES_PRESENT"),
+            "Should emit oneOf XOR mutual exclusion check");
+        assertTrue(content.contains("isSetDepartment()") && content.contains("isSetParent()"),
+            "Should reference isSet guards for XOR branches");
+        assertTrue(content.contains("L10N_UNALLOWED_ATTRIBUTE_PROVIDED_FOR_OPERATION"),
+            "Should reject read-only properties");
+        assertTrue(content.contains("isSetCreated()") || content.contains("isSetArticles()"),
+            "Should include read-only checks from merged FolderBase");
+        assertTrue(content.contains("import com.example.auth.FolderAuthorizer;"),
+            "Should emit extension imports");
+        assertTrue(content.contains("FolderAuthorizer.allowAll(callerContext)"),
+            "Should inject createAuthorizer fragment");
+        assertTrue(content.contains("mLogger.log(Level.INFO, callerContext, logSource, \"stub\")"),
+            "Should inject executeBusinessOperationImpl fragment");
+        assertTrue(
+            content.contains("private CreateFolderPayload mCreateFolderPayload")
+                || content.contains("private FolderBase mFolderBase"),
+            "Request field should be lower-camel of resolved Java request type");
+    }
+
+    @Test
+    @DisplayName("mergedExecutorExtension: x-oas-sdk-executor overrides x-egain-executor methods")
+    public void testMergedExecutorExtensionOverride() {
+        Map<String, Object> op = new LinkedHashMap<>();
+        Map<String, Object> egainExt = new LinkedHashMap<>();
+        Map<String, Object> egainMethods = new LinkedHashMap<>();
+        egainMethods.put("executeBusinessOperationImpl", "egainBody();");
+        egainExt.put("methods", egainMethods);
+        egainExt.put("imports", List.of("com.egain.Legacy"));
+        op.put(JerseyExecutorGenerator.X_EGAIN_EXECUTOR, egainExt);
+
+        Map<String, Object> sdkExt = new LinkedHashMap<>();
+        Map<String, Object> sdkMethods = new LinkedHashMap<>();
+        sdkMethods.put("executeBusinessOperationImpl", "sdkBody();");
+        sdkExt.put("methods", sdkMethods);
+        sdkExt.put("imports", List.of("com.sdk.Modern"));
+        op.put(JerseyExecutorGenerator.X_OAS_SDK_EXECUTOR, sdkExt);
+
+        Map<String, Object> merged = JerseyExecutorGenerator.mergedExecutorExtension(op);
+        assertNotNull(merged);
+        Map<String, Object> methods = Util.asStringObjectMap(merged.get("methods"));
+        assertNotNull(methods);
+        assertEquals("sdkBody();", methods.get("executeBusinessOperationImpl"));
+        @SuppressWarnings("unchecked")
+        List<String> imports = (List<String>) merged.get("imports");
+        assertNotNull(imports);
+        assertTrue(imports.contains("com.egain.Legacy"));
+        assertTrue(imports.contains("com.sdk.Modern"));
     }
 }

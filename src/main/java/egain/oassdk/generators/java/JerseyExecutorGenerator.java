@@ -6,16 +6,24 @@ import egain.oassdk.core.exceptions.GenerationException;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
  * Generates BOExecutor classes (Get/PostPut) for each API operation.
  * Each executor corresponds to a single OpenAPI path+method combination.
+ * <p>See {@link JerseyExecutorSpecValidation} for OpenAPI-driven request validation and notes on
+ * {@code PostPutBOExecutorNoResponseBody_2} vs legacy executor hooks.</p>
  */
 class JerseyExecutorGenerator {
+
+    static final String X_OAS_SDK_EXECUTOR = "x-oas-sdk-executor";
+    static final String X_EGAIN_EXECUTOR = "x-egain-executor";
 
     private final JerseyGenerationContext ctx;
     /**
@@ -126,9 +134,20 @@ class JerseyExecutorGenerator {
         content.append("import com.egain.platform.util.logging.Level;\n");
         content.append("import com.egain.platform.util.logging.LogSource;\n");
         content.append("import com.egain.platform.util.logging.Logger;\n\n");
-        content.append("import egain.ws.common.authorization.AlwaysAuthorizedAuthorizerPartitionFactory;\n");
+        Map<String, Object> executorExt = mergedExecutorExtension(operation);
+        Set<String> extensionImports = extensionImports(executorExt);
+
+        boolean defaultAuthorizer = extensionMethodBody(executorExt, "createAuthorizer") == null;
+        if (defaultAuthorizer) {
+            content.append("import egain.ws.common.authorization.AlwaysAuthorizedAuthorizerPartitionFactory;\n");
+        }
         content.append("import egain.ws.common.authorization.Authorizer;\n");
         content.append("import egain.ws.exception.BadRequestException;\n");
+        for (String imp : extensionImports) {
+            if (imp != null && !imp.isBlank()) {
+                content.append("import ").append(imp.trim()).append(";\n");
+            }
+        }
         if ("get".equalsIgnoreCase(method)) {
             content.append("import egain.ws.framework.GetBOExecutor_2;\n");
         } else {
@@ -173,9 +192,12 @@ class JerseyExecutorGenerator {
             }
         }
 
+        String requestBodyFieldName = requestBodyType != null
+                ? extractRequestBodyFieldName(requestBodyType, operation, spec)
+                : null;
+
         // Generate field for request body if present
-        if (requestBodyType != null) {
-            String requestBodyFieldName = extractRequestBodyFieldName(operation, spec);
+        if (requestBodyType != null && requestBodyFieldName != null) {
             content.append("\tprivate ").append(requestBodyType).append(" m").append(JerseyNamingUtils.capitalize(requestBodyFieldName)).append(";\n");
         }
 
@@ -194,8 +216,7 @@ class JerseyExecutorGenerator {
         constructorParams.add("Map<String, String> solveHeaderMap");
 
         // Add request body parameter if present
-        if (requestBodyType != null) {
-            String requestBodyFieldName = extractRequestBodyFieldName(operation, spec);
+        if (requestBodyType != null && requestBodyFieldName != null) {
             constructorParams.add(requestBodyType + " " + requestBodyFieldName);
         }
 
@@ -230,8 +251,7 @@ class JerseyExecutorGenerator {
         content.append("\t\tthis.solveHeaderMap = solveHeaderMap;\n");
 
         // Initialize request body
-        if (requestBodyType != null) {
-            String requestBodyFieldName = extractRequestBodyFieldName(operation, spec);
+        if (requestBodyType != null && requestBodyFieldName != null) {
             content.append("\t\tthis.m").append(JerseyNamingUtils.capitalize(requestBodyFieldName)).append(" = ").append(requestBodyFieldName).append(";\n");
         }
 
@@ -257,7 +277,6 @@ class JerseyExecutorGenerator {
         content.append("\t@Override\n");
         content.append("\tprotected void validateRequestSyntaxImpl(CallerContext callerContext, Locale locale)\n");
         content.append("\t{\n");
-        content.append("\t\t// TODO: Implement request syntax validation\n");
         content.append("\t\t// Validate required query parameters\n");
 
         if (params != null) {
@@ -291,13 +310,32 @@ class JerseyExecutorGenerator {
         }
 
         content.append("\t\tWsUtil.validateSolveHeaderValues(solveHeaderMap, true, locale, callerContext);\n");
+
+        if (requestBodyType != null && requestBodyFieldName != null) {
+            String specVal = JerseyExecutorSpecValidation.generateRequestBodyValidationCode(
+                    operation, spec, requestBodyFieldName, requestBodyFieldName);
+            if (specVal != null && !specVal.isEmpty()) {
+                content.append(specVal);
+            }
+        }
+
+        String extValidate = indentExecutorFragment(extensionMethodBody(executorExt, "validateRequestSyntaxImpl"));
+        if (extValidate != null) {
+            content.append(extValidate);
+        }
+
         content.append("\t}\n\n");
 
         // Generate createAuthorizer method
         content.append("\t@Override\n");
         content.append("\tprotected Authorizer createAuthorizer(CallerContext callerContext)\n");
         content.append("\t{\n");
-        content.append("\t\treturn AlwaysAuthorizedAuthorizerPartitionFactory.getInstance().getAuth(callerContext);\n");
+        String extAuth = indentExecutorFragment(extensionMethodBody(executorExt, "createAuthorizer"));
+        if (extAuth != null) {
+            content.append(extAuth);
+        } else {
+            content.append("\t\treturn AlwaysAuthorizedAuthorizerPartitionFactory.getInstance().getAuth(callerContext);\n");
+        }
         content.append("\t}\n\n");
 
         // Generate executeBusinessOperationImpl method
@@ -305,12 +343,17 @@ class JerseyExecutorGenerator {
         content.append("\tprotected void executeBusinessOperationImpl(CallerContext callerContext, Locale locale, LogSource logSource)\n");
         content.append("\t\tthrows Exception\n");
         content.append("\t{\n");
-        content.append("\t\tmLogger.log(Level.TRACE, callerContext, logSource, \"Executing business operation\");\n");
-        content.append("\t\t// TODO: Implement business logic\n");
-        if ("get".equalsIgnoreCase(method) && hasResponseBody) {
-            content.append("\t\t// Set mResponseData with the result\n");
-        } else if (!"get".equalsIgnoreCase(method)) {
-            content.append("\t\t// Perform the create/update/delete operation\n");
+        String extExec = indentExecutorFragment(extensionMethodBody(executorExt, "executeBusinessOperationImpl"));
+        if (extExec != null) {
+            content.append(extExec);
+        } else {
+            content.append("\t\tmLogger.log(Level.TRACE, callerContext, logSource, \"Executing business operation\");\n");
+            content.append("\t\t// TODO: Implement business logic\n");
+            if ("get".equalsIgnoreCase(method) && hasResponseBody) {
+                content.append("\t\t// Set mResponseData with the result\n");
+            } else if (!"get".equalsIgnoreCase(method)) {
+                content.append("\t\t// Perform the create/update/delete operation\n");
+            }
         }
         content.append("\t}\n\n");
 
@@ -355,9 +398,14 @@ class JerseyExecutorGenerator {
             content.append("\t@Override\n");
             content.append("\tprotected void convertJaxbBeanToDataObject(CallerContext callerContext, Locale locale)\n");
             content.append("\t{\n");
-            content.append("\t\tLogSource logSource = LogSource.getObject(CLASS_NAME, \"convertJaxbBeanToDataObject()\", FILE_NAME);\n");
-            content.append("\t\tmLogger.log(Level.TRACE, callerContext, logSource, \"Converting JAXB bean to data object\");\n");
-            content.append("\t\t// TODO: Convert request body to data object\n");
+            String extConv = indentExecutorFragment(extensionMethodBody(executorExt, "convertJaxbBeanToDataObject"));
+            if (extConv != null) {
+                content.append(extConv);
+            } else {
+                content.append("\t\tLogSource logSource = LogSource.getObject(CLASS_NAME, \"convertJaxbBeanToDataObject()\", FILE_NAME);\n");
+                content.append("\t\tmLogger.log(Level.TRACE, callerContext, logSource, \"Converting JAXB bean to data object\");\n");
+                content.append("\t\t// TODO: Convert request body to data object\n");
+            }
             content.append("\t}\n\n");
         }
 
@@ -366,8 +414,13 @@ class JerseyExecutorGenerator {
             content.append("\t@Override\n");
             content.append("\tprotected String composeLocationHeader()\n");
             content.append("\t{\n");
-            content.append("\t\t// TODO: Compose location header for created resource\n");
-            content.append("\t\treturn null;\n");
+            String extLoc = indentExecutorFragment(extensionMethodBody(executorExt, "composeLocationHeader"));
+            if (extLoc != null) {
+                content.append(extLoc);
+            } else {
+                content.append("\t\t// TODO: Compose location header for created resource\n");
+                content.append("\t\treturn null;\n");
+            }
             content.append("\t}\n");
 
             content.append("}\n");
@@ -475,22 +528,37 @@ class JerseyExecutorGenerator {
     }
 
     /**
-     * Extract request body field name from operation, deriving it from operationId.
+     * Local variable / field name for the request body: lower-camelCase of the Java model class
+     * (e.g. {@code Folder} → {@code folder}). Falls back to {@code operationId} heuristics when the type is generic.
      */
-    public String extractRequestBodyFieldName(Map<String, Object> operation, Map<String, Object> spec) {
-        String operationId = (String) operation.get("operationId");
-        if (operationId != null && !operationId.isEmpty()) {
-            // Try to extract a meaningful name from operationId
-            // e.g., "createSuggestionComment" -> "comment"
-            String lowerId = operationId.toLowerCase(Locale.ROOT);
-            if (lowerId.startsWith("create")) {
-                return lowerId.substring(6); // Remove "create"
-            } else if (lowerId.startsWith("update")) {
-                return lowerId.substring(6); // Remove "update"
-            } else if (lowerId.endsWith("comment")) {
-                return "comment";
-            } else if (lowerId.endsWith("suggestion")) {
-                return "suggestion";
+    public String extractRequestBodyFieldName(String requestBodyType, Map<String, Object> operation, Map<String, Object> spec) {
+        if (requestBodyType != null) {
+            String t = requestBodyType.trim();
+            if (!t.isEmpty() && !t.contains("<") && !t.contains(">") && !t.contains("[") && !t.contains("]") && !t.contains(",")) {
+                if (Character.isLetter(t.charAt(0))) {
+                    return t.substring(0, 1).toLowerCase(Locale.ROOT) + t.substring(1);
+                }
+            }
+        }
+        if (operation != null) {
+            String operationId = (String) operation.get("operationId");
+            if (operationId != null && !operationId.isEmpty()) {
+                String lowerId = operationId.toLowerCase(Locale.ROOT);
+                if (lowerId.startsWith("create") && lowerId.length() > 6) {
+                    return lowerId.substring(6);
+                }
+                if (lowerId.startsWith("update") && lowerId.length() > 6) {
+                    return lowerId.substring(6);
+                }
+                if (lowerId.startsWith("patch") && lowerId.length() > 5) {
+                    return lowerId.substring(5);
+                }
+                if (lowerId.endsWith("comment")) {
+                    return "comment";
+                }
+                if (lowerId.endsWith("suggestion")) {
+                    return "suggestion";
+                }
             }
         }
         return "requestBody";
@@ -501,5 +569,96 @@ class JerseyExecutorGenerator {
      */
     private String getJavaType(Map<String, Object> schema) {
         return javaTypeResolver.apply(schema);
+    }
+
+    /**
+     * Merge {@code x-oas-sdk-executor} over {@code x-egain-executor}: imports union (SDK last wins order for duplicates),
+     * methods map with SDK overriding eGain for the same key.
+     */
+    static Map<String, Object> mergedExecutorExtension(Map<String, Object> operation) {
+        if (operation == null) {
+            return null;
+        }
+        Map<String, Object> sdk = Util.asStringObjectMap(operation.get(X_OAS_SDK_EXECUTOR));
+        Map<String, Object> egain = Util.asStringObjectMap(operation.get(X_EGAIN_EXECUTOR));
+        if (sdk == null && egain == null) {
+            return null;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        LinkedHashSet<String> imports = new LinkedHashSet<>();
+        if (egain != null) {
+            List<String> li = Util.asStringList(egain.get("imports"));
+            if (li != null) {
+                imports.addAll(li);
+            }
+        }
+        if (sdk != null) {
+            List<String> li = Util.asStringList(sdk.get("imports"));
+            if (li != null) {
+                imports.addAll(li);
+            }
+        }
+        if (!imports.isEmpty()) {
+            out.put("imports", new ArrayList<>(imports));
+        }
+        Map<String, Object> methods = new LinkedHashMap<>();
+        if (egain != null) {
+            Map<String, Object> m = Util.asStringObjectMap(egain.get("methods"));
+            if (m != null) {
+                methods.putAll(m);
+            }
+        }
+        if (sdk != null) {
+            Map<String, Object> m = Util.asStringObjectMap(sdk.get("methods"));
+            if (m != null) {
+                methods.putAll(m);
+            }
+        }
+        if (!methods.isEmpty()) {
+            out.put("methods", methods);
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private static Set<String> extensionImports(Map<String, Object> ext) {
+        if (ext == null) {
+            return new LinkedHashSet<>();
+        }
+        List<String> li = Util.asStringList(ext.get("imports"));
+        if (li == null || li.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+        return new LinkedHashSet<>(li);
+    }
+
+    private static String extensionMethodBody(Map<String, Object> ext, String methodKey) {
+        if (ext == null || methodKey == null) {
+            return null;
+        }
+        Map<String, Object> methods = Util.asStringObjectMap(ext.get("methods"));
+        if (methods == null) {
+            return null;
+        }
+        Object v = methods.get(methodKey);
+        if (v instanceof String s) {
+            String t = s.trim();
+            return t.isEmpty() ? null : t;
+        }
+        return null;
+    }
+
+    /**
+     * Prefix each line with two tabs for injection into generated executor methods.
+     */
+    static String indentExecutorFragment(String fragment) {
+        if (fragment == null || fragment.isBlank()) {
+            return null;
+        }
+        String[] lines = fragment.split("\r?\n", -1);
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            sb.append("\t\t").append(line).append("\n");
+        }
+        return sb.toString();
     }
 }
