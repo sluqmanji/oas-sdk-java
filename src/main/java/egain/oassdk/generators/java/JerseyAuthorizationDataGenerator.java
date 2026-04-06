@@ -385,8 +385,8 @@ class JerseyAuthorizationDataGenerator {
             }
             return value.toString();
         }
-        if (value instanceof String) {
-            return "\"" + escapeJavaString((String) value) + "\"";
+        if (value instanceof String str) {
+            return "\"" + escapeJavaString(str) + "\"";
         }
         return String.valueOf(value);
     }

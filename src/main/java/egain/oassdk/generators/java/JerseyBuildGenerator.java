@@ -35,8 +35,6 @@ class JerseyBuildGenerator {
                 import org.glassfish.grizzly.http.server.HttpServer;
                 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
                 import org.glassfish.jersey.server.ResourceConfig;
-                import jakarta.ws.rs.ApplicationPath;
-                import jakarta.ws.rs.core.Application;
                 import jakarta.ws.rs.ext.ContextResolver;
                 import jakarta.ws.rs.ext.Provider;
                 import java.io.IOException;
@@ -48,7 +46,6 @@ class JerseyBuildGenerator {
                 import org.glassfish.jersey.jackson.JacksonFeature;
                 import java.util.logging.Logger;
 
-                @ApplicationPath("/api")
                 public class %s extends ResourceConfig {
 
                     private static final Logger logger = Logger.getLogger(%s.class.getName());
@@ -154,6 +151,8 @@ class JerseyBuildGenerator {
                 import jakarta.ws.rs.ext.Provider;
                 import java.io.IOException;
 
+                // TODO: SECURITY - Restrict CORS origins before deploying to production.
+                // Replace "*" with specific allowed origins (e.g., "https://yourdomain.com").
                 @Provider
                 public class CorsFilter implements ContainerResponseFilter {
 
@@ -179,17 +178,23 @@ class JerseyBuildGenerator {
         String exceptionContent = String.format("""
                 package %s.exception;
 
+                import jakarta.ws.rs.core.MediaType;
                 import jakarta.ws.rs.core.Response;
                 import jakarta.ws.rs.ext.ExceptionMapper;
                 import jakarta.ws.rs.ext.Provider;
+                import java.util.logging.Level;
+                import java.util.logging.Logger;
 
                 @Provider
                 public class GenericExceptionMapper implements ExceptionMapper<Exception> {
+                    private static final Logger logger = Logger.getLogger(GenericExceptionMapper.class.getName());
 
                     @Override
                     public Response toResponse(Exception exception) {
+                        logger.log(Level.SEVERE, "Unhandled exception", exception);
                         return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                                .entity("An error occurred: " + exception.getMessage())
+                                .entity("{\\"error\\": \\"Internal server error\\"}")
+                                .type(MediaType.APPLICATION_JSON)
                                 .build();
                     }
                 }

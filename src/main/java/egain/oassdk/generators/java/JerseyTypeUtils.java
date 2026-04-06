@@ -12,8 +12,11 @@ class JerseyTypeUtils {
 
     private final JerseyGenerationContext ctx;
 
-    /** Visited set for getJavaType to prevent infinite recursion (cycle detection). */
+    /** Visited set for getJavaType to prevent infinite recursion (identity-based cycle detection). */
     private final Set<Object> javaTypeVisited = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /** Name-based visited set as a secondary guard against cycles through $ref resolution. */
+    private final Set<String> javaTypeVisitedNames = new HashSet<>();
 
     /** Types that do not require a model import (primitives, java/javax types, current class). */
     private static final Set<String> MODEL_IMPORT_EXCLUDES = Set.of(
@@ -36,15 +39,28 @@ class JerseyTypeUtils {
             return "Object";
         }
 
-        // Cycle detection for getJavaType
+        // Cycle detection: identity-based for same object reference
         if (javaTypeVisited.contains(schema)) {
             return "Object"; // Return default to break cycle
         }
+
+        // Secondary name-based cycle detection for schemas resolved through $ref
+        String schemaRef = schema.containsKey("$ref") ? String.valueOf(schema.get("$ref")) : null;
+        if (schemaRef != null && javaTypeVisitedNames.contains(schemaRef)) {
+            return "Object";
+        }
+
         javaTypeVisited.add(schema);
+        if (schemaRef != null) {
+            javaTypeVisitedNames.add(schemaRef);
+        }
         try {
             return getJavaTypeInternal(schema);
         } finally {
             javaTypeVisited.remove(schema);
+            if (schemaRef != null) {
+                javaTypeVisitedNames.remove(schemaRef);
+            }
         }
     }
 

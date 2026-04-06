@@ -59,8 +59,8 @@ public class Util {
         for (Object item : raw) {
             if (item == null) {
                 out.add(null);
-            } else if (item instanceof String) {
-                out.add((String) item);
+            } else if (item instanceof String str) {
+                out.add(str);
             } else {
                 throw new IllegalArgumentException("Expected List<String>, found non-String element: " +
                         item.getClass().getName());

@@ -25,6 +25,16 @@ class JerseyModelGenerator {
         this.schemaCollector = schemaCollector;
     }
 
+    /**
+     * Returns true when generating for standalone (open-source) mode, where proprietary
+     * eGain platform classes (JAXBBean, CallerContext, etc.) are not available.
+     * Controlled by the "standaloneMode" additional property in GeneratorConfig.
+     */
+    private boolean isStandaloneMode() {
+        return ctx.config != null && ctx.config.getAdditionalProperties() != null
+                && "true".equals(String.valueOf(ctx.config.getAdditionalProperties().get("standaloneMode")));
+    }
+
     /** Holder for wrapper inner class to generate: outer property name, wrapper class name, inner property name, item type name. */
     static final class WrapperToGenerate {
         final String fieldName;
@@ -128,8 +138,7 @@ class JerseyModelGenerator {
 
             if (!hasStructure && schema.containsKey("type")) {
                 Object type = schema.get("type");
-                if (type instanceof String) {
-                    String typeStr = (String) type;
+                if (type instanceof String typeStr) {
                     if ("array".equals(typeStr) && allReferencedNames.contains(schemaName)) {
                         // Generate model for array type that's referenced
                     } else if (!"object".equals(typeStr)) {
@@ -264,7 +273,10 @@ class JerseyModelGenerator {
         }
 
         content.append("package ").append(packagePath).append(ctx.modelsOnly?"."+JerseyNamingUtils.sanitizePackageName(schemaName)+";\n\n":".model;\n\n");
-        content.append("import com.egain.platform.common.JAXBBean;\n");
+        boolean includeJaxbBean = !isStandaloneMode();
+        if (includeJaxbBean) {
+            content.append("import com.egain.platform.common.JAXBBean;\n");
+        }
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import javax.validation.constraints.*;\n");
         content.append("import javax.validation.Valid;\n");
@@ -300,14 +312,20 @@ class JerseyModelGenerator {
         }
         content.append("})\n");
 
-        content.append("public class ").append(schemaName).append(" implements Serializable, JAXBBean {\n\n");
+        if (includeJaxbBean) {
+            content.append("public class ").append(schemaName).append(" implements Serializable, JAXBBean {\n\n");
+        } else {
+            content.append("public class ").append(schemaName).append(" implements Serializable {\n\n");
+        }
 
         // Add serialVersionUID for Serializable
         content.append("    private static final long serialVersionUID = 1L;\n\n");
 
-        // Add field for dynamic attributes (excluded from JAXB binding)
-        content.append("    @XmlTransient\n");
-        content.append("    private Map<String, Object> _attributes;\n\n");
+        // Add field for dynamic attributes (excluded from JAXB binding) - only when JAXBBean is included
+        if (includeJaxbBean) {
+            content.append("    @XmlTransient\n");
+            content.append("    private Map<String, Object> _attributes;\n\n");
+        }
 
         // Generate fields
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
@@ -490,7 +508,8 @@ class JerseyModelGenerator {
             content.append("    }\n\n");
         }
 
-        // Generate JAXBBean interface methods
+        // Generate JAXBBean interface methods (only when JAXBBean is included)
+        if (includeJaxbBean) {
         content.append("    @Override\n");
         content.append("    public Object getAttribute(String name) {\n");
         if (!fieldNames.isEmpty()) {
@@ -639,6 +658,7 @@ class JerseyModelGenerator {
             content.append("        _attributes.put(name, value);\n");
         }
         content.append("    }\n");
+        } // end JAXBBean interface methods
 
         // Generate static inner classes for inline object properties
         for (Map.Entry<String, Map<String, Object>> entry : innerClassesToGenerate) {
@@ -705,7 +725,11 @@ class JerseyModelGenerator {
             content.append(i < fieldNames.size() - 1 ? ",\n" : "\n");
         }
         content.append(indentClass).append("})\n");
-        content.append(indentClass).append("public static class ").append(innerClassName).append(" implements Serializable, JAXBBean {\n\n");
+        if (!isStandaloneMode()) {
+            content.append(indentClass).append("public static class ").append(innerClassName).append(" implements Serializable, JAXBBean {\n\n");
+        } else {
+            content.append(indentClass).append("public static class ").append(innerClassName).append(" implements Serializable {\n\n");
+        }
         content.append(indentBody).append("private static final long serialVersionUID = 1L;\n\n");
 
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {

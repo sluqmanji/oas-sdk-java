@@ -178,15 +178,15 @@ public class OASParser {
     public String getOpenAPIVersion(Map<String, Object> spec) {
         if (spec.containsKey("openapi")) {
             Object value = spec.get("openapi");
-            if (value instanceof String) {
-                return (String) value;
+            if (value instanceof String str) {
+                return str;
             } else if (value instanceof Number) {
                 return String.valueOf(value);
             }
         } else if (spec.containsKey("swagger")) {
             Object value = spec.get("swagger");
-            if (value instanceof String) {
-                return (String) value;
+            if (value instanceof String str) {
+                return str;
             } else if (value instanceof Number) {
                 return String.valueOf(value);
             }

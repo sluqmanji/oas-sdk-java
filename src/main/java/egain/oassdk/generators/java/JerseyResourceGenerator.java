@@ -13,6 +13,8 @@ import java.util.function.Function;
  */
 class JerseyResourceGenerator {
 
+    private static final java.util.regex.Pattern VERSION_PATTERN = java.util.regex.Pattern.compile("(/v\\d+)");
+
     private final JerseyGenerationContext ctx;
     /**
      * Function to resolve an OpenAPI schema map to a Java type string.
@@ -134,8 +136,7 @@ class JerseyResourceGenerator {
             String firstPath = operations.getFirst().path;
             if (firstPath != null) {
                 // Check for version pattern like /v1, /v2, /v4, etc.
-                java.util.regex.Pattern versionPattern = java.util.regex.Pattern.compile("(/v\\d+)");
-                java.util.regex.Matcher matcher = versionPattern.matcher(firstPath);
+                java.util.regex.Matcher matcher = VERSION_PATTERN.matcher(firstPath);
 
                 if (matcher.find()) {
                     // Extract the path up to and including the version

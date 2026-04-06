@@ -649,8 +649,8 @@ public class MockDataGenerator implements TestGenerator, ConfigurableTestGenerat
             return "null";
         }
 
-        if (value instanceof String) {
-            return "\"" + escapeJson((String) value) + "\"";
+        if (value instanceof String str) {
+            return "\"" + escapeJson(str) + "\"";
         } else if (value instanceof Number || value instanceof Boolean) {
             return value.toString();
         } else if (value instanceof Map) {

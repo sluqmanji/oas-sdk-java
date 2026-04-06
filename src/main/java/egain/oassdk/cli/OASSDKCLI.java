@@ -78,16 +78,16 @@ public class OASSDKCLI implements Callable<Integer> {
                 GeneratorConfig generatorConfig = configBuilder.build();
 
                 // Initialize SDK
-                OASSDK sdk = new OASSDK(generatorConfig, null, null);
+                try (OASSDK sdk = new OASSDK(generatorConfig, null, null)) {
+                    // Load specification (filesystem path or ZIP entry path when specZipPath is set)
+                    sdk.loadSpec(specPath);
 
-                // Load specification (filesystem path or ZIP entry path when specZipPath is set)
-                sdk.loadSpec(specPath);
+                    // Generate application
+                    sdk.generateApplication(language, framework, packageName, output);
 
-                // Generate application
-                sdk.generateApplication(language, framework, packageName, output);
-
-                logger.info("✅ Application generated successfully in " + output);
-                return 0;
+                    logger.info("✅ Application generated successfully in " + output);
+                    return 0;
+                }
 
             } catch (OASSDKException e) {
                 logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
@@ -121,16 +121,16 @@ public class OASSDKCLI implements Callable<Integer> {
                 TestConfig testConfig = TestConfig.builder()
                         .testFramework(framework)
                         .build();
-                OASSDK sdk = new OASSDK(null, testConfig, null);
+                try (OASSDK sdk = new OASSDK(null, testConfig, null)) {
+                    // Load specification
+                    sdk.loadSpec(specPath);
 
-                // Load specification
-                sdk.loadSpec(specPath);
+                    // Generate tests
+                    sdk.generateTests(types, framework, output);
 
-                // Generate tests
-                sdk.generateTests(types, framework, output);
-
-                logger.info("✅ Tests generated successfully in " + output);
-                return 0;
+                    logger.info("✅ Tests generated successfully in " + output);
+                    return 0;
+                }
 
             } catch (OASSDKException e) {
                 logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
@@ -151,10 +151,7 @@ public class OASSDKCLI implements Callable<Integer> {
 
         @Override
         public Integer call() {
-            try {
-                // Initialize SDK
-                OASSDK sdk = new OASSDK();
-
+            try (OASSDK sdk = new OASSDK()) {
                 // Load specification
                 sdk.loadSpec(specPath);
 
@@ -191,16 +188,16 @@ public class OASSDKCLI implements Callable<Integer> {
                 SLAConfig slaConfig = SLAConfig.builder()
                         .slaFile(slaPath)
                         .build();
-                OASSDK sdk = new OASSDK(null, null, slaConfig);
+                try (OASSDK sdk = new OASSDK(null, null, slaConfig)) {
+                    // Load specification
+                    sdk.loadSpec(specPath);
 
-                // Load specification
-                sdk.loadSpec(specPath);
+                    // Generate SLA enforcement
+                    sdk.generateSLAEnforcement(slaPath, output);
 
-                // Generate SLA enforcement
-                sdk.generateSLAEnforcement(slaPath, output);
-
-                logger.info("✅ SLA enforcement generated successfully in " + output);
-                return 0;
+                    logger.info("✅ SLA enforcement generated successfully in " + output);
+                    return 0;
+                }
 
             } catch (OASSDKException e) {
                 logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
@@ -247,14 +244,14 @@ public class OASSDKCLI implements Callable<Integer> {
                 TestConfig testConfig = TestConfig.builder().build();
                 SLAConfig slaConfig = null;
 
-                OASSDK sdk = new OASSDK(generatorConfig, testConfig, slaConfig);
+                try (OASSDK sdk = new OASSDK(generatorConfig, testConfig, slaConfig)) {
+                    sdk.loadSpec(specPath);
 
-                sdk.loadSpec(specPath);
+                    sdk.generateAll(output);
 
-                sdk.generateAll(output);
-
-                logger.info("✅ Complete project generated successfully in " + output);
-                return 0;
+                    logger.info("✅ Complete project generated successfully in " + output);
+                    return 0;
+                }
 
             } catch (OASSDKException e) {
                 logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
@@ -271,10 +268,7 @@ public class OASSDKCLI implements Callable<Integer> {
 
         @Override
         public Integer call() {
-            try {
-                // Initialize SDK
-                OASSDK sdk = new OASSDK();
-
+            try (OASSDK sdk = new OASSDK()) {
                 // Load specification
                 sdk.loadSpec(specPath);
 
@@ -302,10 +296,7 @@ public class OASSDKCLI implements Callable<Integer> {
 
         @Override
         public Integer call() {
-            try {
-                // Initialize SDK
-                OASSDK sdk = new OASSDK();
-
+            try (OASSDK sdk = new OASSDK()) {
                 // Load specification
                 sdk.loadSpec(specPath);
 

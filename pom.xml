@@ -96,12 +96,6 @@
             <artifactId>swagger-ui</artifactId>
             <version>${swagger-ui.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.openapitools</groupId>
-            <artifactId>openapi-generator-maven-plugin</artifactId>
-            <version>${openapi-generator-maven.version}</version>
-        </dependency>
-
         <!-- OpenAPI dependencies -->
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
@@ -352,6 +346,7 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>egain.oassdk.cli.OASSDKCLI</mainClass>
                                 </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                             <filters>
                                 <filter>

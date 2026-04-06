@@ -1436,8 +1436,8 @@ public class FastAPIGenerator implements CodeGenerator, ConfigurableGenerator {
 
         if (schema != null) {
             Object description = schema.get("description");
-            if (description instanceof String) {
-                String desc = ((String) description).toLowerCase();
+            if (description instanceof String descStr) {
+                String desc = descStr.toLowerCase();
                 return desc.contains("error") || desc.contains("exception") || desc.contains("fault");
             }
         }

@@ -917,10 +917,10 @@ public class PostmanTestGenerator implements TestGenerator, ConfigurableTestGene
             if (!first) json.append(",\n");
             json.append("    ");
 
-            if (item instanceof String) {
-                json.append("\"").append(escapeJsonString((String) item)).append("\"");
-            } else if (item instanceof Map) {
-                json.append(convertMapToJson((Map<?, ?>) item));
+            if (item instanceof String str) {
+                json.append("\"").append(escapeJsonString(str)).append("\"");
+            } else if (item instanceof Map<?, ?> map) {
+                json.append(convertMapToJson(map));
             } else {
                 json.append(item);
             }

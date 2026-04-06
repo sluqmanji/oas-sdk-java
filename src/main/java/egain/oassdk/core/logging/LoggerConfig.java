@@ -37,12 +37,12 @@ public class LoggerConfig {
     private static final String LOG_BACKUPS_PROPERTY = "oas.sdk.log.backups";
     private static final String LOG_LEVEL_PROPERTY = "oas.sdk.log.level";
     
-    private static boolean initialized = false;
-    private static String logDirectory;
-    private static String logFileName;
-    private static int maxFileSize;
-    private static int maxBackupFiles;
-    private static Level logLevel;
+    private static volatile boolean initialized = false;
+    private static volatile String logDirectory;
+    private static volatile String logFileName;
+    private static volatile int maxFileSize;
+    private static volatile int maxBackupFiles;
+    private static volatile Level logLevel;
     
     // Fallback logger for initialization phase (before logging is fully configured)
     private static final Logger fallbackLogger = Logger.getLogger(LoggerConfig.class.getName());
