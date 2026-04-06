@@ -119,7 +119,7 @@ class JerseyExecutorGenerator {
         content.append("import java.util.List;\n");
         content.append("import java.util.Locale;\n");
         content.append("import java.util.Map;\n\n");
-        content.append("import javax.xml.bind.JAXBElement;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
         content.append("import com.egain.platform.common.CallerContext;\n");
         content.append("import com.egain.platform.common.exception.PlatformException;\n");
@@ -141,7 +141,7 @@ class JerseyExecutorGenerator {
         content.append("import egain.ws.util.WsUtil;\n");
         content.append("import com.egain.platform.util.Util;\n");
         content.append("import ").append(packagePath).append(".model.*;\n\n");
-        content.append("import static javax.ws.rs.core.Response.Status.BAD_REQUEST;\n\n");
+        content.append("import static ").append(ctx.wsNs).append(".core.Response.Status.BAD_REQUEST;\n\n");
 
         // Generate class declaration
         content.append("public class ").append(executorClassName).append(" extends ").append(baseExecutorClass);

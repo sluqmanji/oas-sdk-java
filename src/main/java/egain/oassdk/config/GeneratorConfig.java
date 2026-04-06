@@ -37,6 +37,10 @@ public class GeneratorConfig {
     /** Optional FQCN used when a schema extension omits {@code extends}. */
     private String defaultAuthorizationDataExtends;
 
+    /** When true, generated Java code uses {@code jakarta.*} namespace (Jakarta EE 9+).
+     *  When false (default), uses {@code javax.*} namespace (Java EE 8 and earlier). */
+    private boolean useJakartaNamespace;
+
     // Observability configuration (OpenTelemetry + Micrometer)
     private ObservabilityConfig observabilityConfig;
 
@@ -58,6 +62,7 @@ public class GeneratorConfig {
         this.specZipPath = null;
         this.authorizationDataGenerationEnabled = false;
         this.defaultAuthorizationDataExtends = null;
+        this.useJakartaNamespace = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -81,6 +86,7 @@ public class GeneratorConfig {
         this.specZipPath = null;
         this.authorizationDataGenerationEnabled = false;
         this.defaultAuthorizationDataExtends = null;
+        this.useJakartaNamespace = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -139,6 +145,14 @@ public class GeneratorConfig {
 
     public void setAuthorizationDataGenerationEnabled(boolean authorizationDataGenerationEnabled) {
         this.authorizationDataGenerationEnabled = authorizationDataGenerationEnabled;
+    }
+
+    public boolean isUseJakartaNamespace() {
+        return useJakartaNamespace;
+    }
+
+    public void setUseJakartaNamespace(boolean useJakartaNamespace) {
+        this.useJakartaNamespace = useJakartaNamespace;
     }
 
     public String getDefaultAuthorizationDataExtends() {
@@ -251,6 +265,7 @@ public class GeneratorConfig {
         private boolean modelsOnly = false;
         private boolean authorizationDataGenerationEnabled = false;
         private String defaultAuthorizationDataExtends = null;
+        private boolean useJakartaNamespace = false;
         private ObservabilityConfig observabilityConfig = new ObservabilityConfig();
 
         public Builder language(String language) {
@@ -335,6 +350,11 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder useJakartaNamespace(boolean useJakartaNamespace) {
+            this.useJakartaNamespace = useJakartaNamespace;
+            return this;
+        }
+
         public Builder observabilityConfig(ObservabilityConfig observabilityConfig) {
             this.observabilityConfig = observabilityConfig;
             return this;
@@ -355,6 +375,7 @@ public class GeneratorConfig {
             config.setModelsOnly(modelsOnly);
             config.setAuthorizationDataGenerationEnabled(authorizationDataGenerationEnabled);
             config.setDefaultAuthorizationDataExtends(defaultAuthorizationDataExtends);
+            config.setUseJakartaNamespace(useJakartaNamespace);
             config.setObservabilityConfig(observabilityConfig);
             return config;
         }
@@ -387,6 +408,7 @@ public class GeneratorConfig {
                 ", modelsOnly=" + modelsOnly +
                 ", authorizationDataGenerationEnabled=" + authorizationDataGenerationEnabled +
                 ", defaultAuthorizationDataExtends='" + defaultAuthorizationDataExtends + '\'' +
+                ", useJakartaNamespace=" + useJakartaNamespace +
                 ", observabilityConfig=" + observabilityConfig +
                 '}';
     }

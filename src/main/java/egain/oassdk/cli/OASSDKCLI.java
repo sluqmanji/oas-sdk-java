@@ -61,6 +61,9 @@ public class OASSDKCLI implements Callable<Integer> {
         @Option(names = {"--authorization-data"}, description = "Generate Java classes from x-egain-authorization-data on component schemas")
         private boolean authorizationData;
 
+        @Option(names = {"--jakarta"}, description = "Use Jakarta EE namespace (jakarta.*) instead of Java EE namespace (javax.*) in generated code")
+        private boolean useJakartaNamespace;
+
         @Override
         public Integer call() {
             try {
@@ -71,7 +74,8 @@ public class OASSDKCLI implements Callable<Integer> {
                         .packageName(packageName)
                         .outputDir(output)
                         .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
-                        .authorizationDataGenerationEnabled(authorizationData);
+                        .authorizationDataGenerationEnabled(authorizationData)
+                        .useJakartaNamespace(useJakartaNamespace);
                 if (specZipPath != null && !specZipPath.isEmpty()) {
                     configBuilder.specZipPath(specZipPath);
                 }
@@ -231,6 +235,9 @@ public class OASSDKCLI implements Callable<Integer> {
                 description = "Path(s) to search for external $ref (e.g. published root). Comma-separated or repeated.")
         private List<String> searchPaths;
 
+        @Option(names = {"--jakarta"}, description = "Use Jakarta EE namespace (jakarta.*) instead of Java EE namespace (javax.*) in generated code")
+        private boolean useJakartaNamespace;
+
         @Override
         public Integer call() {
             try {
@@ -240,6 +247,7 @@ public class OASSDKCLI implements Callable<Integer> {
                         .packageName(packageName)
                         .outputDir(output)
                         .searchPaths(searchPaths != null && !searchPaths.isEmpty() ? searchPaths : null)
+                        .useJakartaNamespace(useJakartaNamespace)
                         .build();
                 TestConfig testConfig = TestConfig.builder().build();
                 SLAConfig slaConfig = null;

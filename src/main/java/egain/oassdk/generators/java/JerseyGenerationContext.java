@@ -24,7 +24,15 @@ class JerseyGenerationContext {
     final GeneratorConfig config;
     final String packageName;
     final boolean modelsOnly;
+    final boolean useJakarta;
     final Map<Object, String> inlinedSchemas = new IdentityHashMap<>();
+
+    /** javax/jakarta namespace prefix — "javax" or "jakarta" depending on config. */
+    final String wsNs;          // "javax.ws.rs" or "jakarta.ws.rs"
+    final String validationNs;  // "javax.validation" or "jakarta.validation"
+    final String xmlBindNs;     // "javax.xml.bind" or "jakarta.xml.bind"
+    final String injectNs;      // "javax.inject" or "jakarta.inject"
+    final String servletNs;     // "javax.servlet" or "jakarta.servlet"
 
     JerseyGenerationContext(Map<String, Object> spec, String outputDir, GeneratorConfig config, String packageName) {
         this.spec = spec;
@@ -32,6 +40,14 @@ class JerseyGenerationContext {
         this.config = config;
         this.packageName = packageName;
         this.modelsOnly = config != null && config.isModelsOnly();
+        this.useJakarta = config != null && config.isUseJakartaNamespace();
+
+        String base = useJakarta ? "jakarta" : "javax";
+        this.wsNs = base + ".ws.rs";
+        this.validationNs = base + ".validation";
+        this.xmlBindNs = base + ".xml.bind";
+        this.injectNs = base + ".inject";
+        this.servletNs = base + ".servlet";
     }
 
     /**

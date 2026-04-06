@@ -278,10 +278,10 @@ class JerseyModelGenerator {
             content.append("import com.egain.platform.common.JAXBBean;\n");
         }
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
-        content.append("import javax.validation.constraints.*;\n");
-        content.append("import javax.validation.Valid;\n");
-        content.append("import javax.xml.bind.annotation.*;\n");
-        content.append("import javax.xml.bind.JAXBElement;\n");
+        content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
+        content.append("import ").append(ctx.validationNs).append(".Valid;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".annotation.*;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
         content.append("import javax.xml.namespace.QName;\n");
         content.append("import java.io.Serializable;\n");
         content.append("import java.util.Objects;\n");
@@ -991,10 +991,10 @@ class JerseyModelGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".model;\n\n");
-        content.append("import javax.xml.bind.JAXBElement;\n");
-        content.append("import javax.xml.bind.annotation.XmlElementDecl;\n");
-        content.append("import javax.xml.bind.annotation.XmlRegistry;\n");
-        content.append("import javax.validation.constraints.*;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlElementDecl;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlRegistry;\n");
+        content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
 
         content.append("@XmlRegistry\n");
@@ -1020,10 +1020,10 @@ class JerseyModelGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append("." + JerseyNamingUtils.sanitizePackageName(generatedTopLevelClassName) + ";\n\n");
-        content.append("import javax.xml.bind.JAXBElement;\n");
-        content.append("import javax.xml.bind.annotation.XmlElementDecl;\n");
-        content.append("import javax.xml.bind.annotation.XmlRegistry;\n");
-        content.append("import javax.validation.constraints.*;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlElementDecl;\n");
+        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlRegistry;\n");
+        content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
 
         content.append("@XmlRegistry\n");

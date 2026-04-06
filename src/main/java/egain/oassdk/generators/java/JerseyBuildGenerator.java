@@ -29,14 +29,15 @@ class JerseyBuildGenerator {
         String packagePath = packageName != null ? packageName : "com.example.api";
         String className = JerseyGenerationContext.getAPITitle(spec).replaceAll("[^a-zA-Z0-9]", "") + "Application";
 
+        String wsNs = ctx.wsNs;
         String content = String.format("""
                 package %s;
 
                 import org.glassfish.grizzly.http.server.HttpServer;
                 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
                 import org.glassfish.jersey.server.ResourceConfig;
-                import jakarta.ws.rs.ext.ContextResolver;
-                import jakarta.ws.rs.ext.Provider;
+                import %s.ext.ContextResolver;
+                import %s.ext.Provider;
                 import java.io.IOException;
                 import java.net.URI;
                 import java.util.HashSet;
@@ -92,7 +93,7 @@ class JerseyBuildGenerator {
                         server.shutdown();
                     }
                 }
-                """, packagePath, className, className, className, packagePath, packagePath, getObservabilityRegistration(packagePath), className);
+                """, packagePath, wsNs, wsNs, className, className, className, packagePath, packagePath, getObservabilityRegistration(packagePath), className);
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/" + className + ".java", content);
     }
@@ -121,7 +122,7 @@ class JerseyBuildGenerator {
         String serviceContent = String.format("""
                 package %s.service;
 
-                import jakarta.inject.Singleton;
+                import %s.Singleton;
 
                 @Singleton
                 public class ApiService {
@@ -131,7 +132,7 @@ class JerseyBuildGenerator {
                     // Implement methods that correspond to the operations defined in the OpenAPI specification
 
                 }
-                """, packagePath);
+                """, packagePath, ctx.injectNs);
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/service/ApiService.java", serviceContent);
     }
@@ -145,10 +146,10 @@ class JerseyBuildGenerator {
         String configContent = String.format("""
                 package %s.config;
 
-                import jakarta.ws.rs.container.ContainerRequestContext;
-                import jakarta.ws.rs.container.ContainerResponseContext;
-                import jakarta.ws.rs.container.ContainerResponseFilter;
-                import jakarta.ws.rs.ext.Provider;
+                import %s.container.ContainerRequestContext;
+                import %s.container.ContainerResponseContext;
+                import %s.container.ContainerResponseFilter;
+                import %s.ext.Provider;
                 import java.io.IOException;
 
                 // TODO: SECURITY - Restrict CORS origins before deploying to production.
@@ -164,7 +165,7 @@ class JerseyBuildGenerator {
                         responseContext.getHeaders().add("Access-Control-Allow-Headers", "*");
                     }
                 }
-                """, packagePath);
+                """, packagePath, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/config/CorsFilter.java", configContent);
     }
@@ -178,10 +179,10 @@ class JerseyBuildGenerator {
         String exceptionContent = String.format("""
                 package %s.exception;
 
-                import jakarta.ws.rs.core.MediaType;
-                import jakarta.ws.rs.core.Response;
-                import jakarta.ws.rs.ext.ExceptionMapper;
-                import jakarta.ws.rs.ext.Provider;
+                import %s.core.MediaType;
+                import %s.core.Response;
+                import %s.ext.ExceptionMapper;
+                import %s.ext.Provider;
                 import java.util.logging.Level;
                 import java.util.logging.Logger;
 
@@ -198,7 +199,7 @@ class JerseyBuildGenerator {
                                 .build();
                     }
                 }
-                """, packagePath);
+                """, packagePath, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/exception/GenericExceptionMapper.java", exceptionContent);
     }
@@ -220,6 +221,81 @@ class JerseyBuildGenerator {
      * Generate Maven pom.xml content.
      */
     public String generatePomXml(Map<String, Object> spec, String packageName) {
+        String namespaceDeps;
+        if (ctx.useJakarta) {
+            namespaceDeps = """
+                                <!-- JAXB (Jakarta) -->
+                                <dependency>
+                                    <groupId>jakarta.xml.bind</groupId>
+                                    <artifactId>jakarta.xml.bind-api</artifactId>
+                                    <version>4.0.0</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>org.glassfish.jaxb</groupId>
+                                    <artifactId>jaxb-runtime</artifactId>
+                                    <version>4.0.3</version>
+                                </dependency>
+
+                                <!-- Jakarta APIs -->
+                                <dependency>
+                                    <groupId>jakarta.ws.rs</groupId>
+                                    <artifactId>jakarta.ws.rs-api</artifactId>
+                                    <version>3.1.0</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>jakarta.servlet</groupId>
+                                    <artifactId>jakarta.servlet-api</artifactId>
+                                    <version>6.0.0</version>
+                                    <scope>provided</scope>
+                                </dependency>
+                                <dependency>
+                                    <groupId>jakarta.validation</groupId>
+                                    <artifactId>jakarta.validation-api</artifactId>
+                                    <version>3.0.2</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>org.hibernate.validator</groupId>
+                                    <artifactId>hibernate-validator</artifactId>
+                                    <version>8.0.1.Final</version>
+                                </dependency>""";
+        } else {
+            namespaceDeps = """
+                                <!-- JAXB (javax) -->
+                                <dependency>
+                                    <groupId>javax.xml.bind</groupId>
+                                    <artifactId>javax.xml.bind-api</artifactId>
+                                    <version>2.3.1</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>org.glassfish.jaxb</groupId>
+                                    <artifactId>jaxb-runtime</artifactId>
+                                    <version>2.3.11</version>
+                                </dependency>
+
+                                <!-- Java EE APIs -->
+                                <dependency>
+                                    <groupId>javax.ws.rs</groupId>
+                                    <artifactId>javax.ws.rs-api</artifactId>
+                                    <version>2.1.1</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>javax.servlet</groupId>
+                                    <artifactId>javax.servlet-api</artifactId>
+                                    <version>4.0.1</version>
+                                    <scope>provided</scope>
+                                </dependency>
+                                <dependency>
+                                    <groupId>javax.validation</groupId>
+                                    <artifactId>validation-api</artifactId>
+                                    <version>2.0.1.Final</version>
+                                </dependency>
+                                <dependency>
+                                    <groupId>org.hibernate.validator</groupId>
+                                    <artifactId>hibernate-validator</artifactId>
+                                    <version>6.2.5.Final</version>
+                                </dependency>""";
+        }
+
         return String.format("""
                         <?xml version="1.0" encoding="UTF-8"?>
                         <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -278,18 +354,6 @@ class JerseyBuildGenerator {
                                     <version>${jersey.version}</version>
                                 </dependency>
 
-                                <!-- JAXB -->
-                                <dependency>
-                                    <groupId>javax.xml.bind</groupId>
-                                    <artifactId>javax.xml.bind-api</artifactId>
-                                    <version>2.3.1</version>
-                                </dependency>
-                                <dependency>
-                                    <groupId>org.glassfish.jaxb</groupId>
-                                    <artifactId>jaxb-runtime</artifactId>
-                                    <version>2.3.11</version>
-                                </dependency>
-
                                 <!-- Jackson -->
                                 <dependency>
                                     <groupId>com.fasterxml.jackson.core</groupId>
@@ -302,28 +366,7 @@ class JerseyBuildGenerator {
                                     <version>${jackson.version}</version>
                                 </dependency>
 
-                                <!-- Jakarta APIs -->
-                                <dependency>
-                                    <groupId>jakarta.ws.rs</groupId>
-                                    <artifactId>jakarta.ws.rs-api</artifactId>
-                                    <version>3.1.0</version>
-                                </dependency>
-                                <dependency>
-                                    <groupId>jakarta.servlet</groupId>
-                                    <artifactId>jakarta.servlet-api</artifactId>
-                                    <version>6.0.0</version>
-                                    <scope>provided</scope>
-                                </dependency>
-                                <dependency>
-                                    <groupId>jakarta.validation</groupId>
-                                    <artifactId>jakarta.validation-api</artifactId>
-                                    <version>3.0.2</version>
-                                </dependency>
-                                <dependency>
-                                    <groupId>org.hibernate.validator</groupId>
-                                    <artifactId>hibernate-validator</artifactId>
-                                    <version>8.0.1.Final</version>
-                                </dependency>
+                %s
                 %s
                             </dependencies>
 
@@ -352,6 +395,7 @@ class JerseyBuildGenerator {
                 JerseyGenerationContext.getAPIVersion(spec),
                 JerseyGenerationContext.getAPITitle(spec),
                 JerseyGenerationContext.getAPIDescription(spec),
+                namespaceDeps,
                 getObservabilityDependencies());
     }
 
@@ -393,27 +437,54 @@ class JerseyBuildGenerator {
      */
     public String generateWebXml(String packageName) {
         String packagePath = packageName != null ? packageName : "com.example.api";
-        return String.format("""
-                <?xml version="1.0" encoding="UTF-8"?>
-                <web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
-                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee
-                         https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
-                         version="6.0">
-                    <servlet>
-                        <servlet-name>Jersey Servlet</servlet-name>
-                        <servlet-class>org.glassfish.jersey.servlet.ServletContainer</servlet-class>
-                        <init-param>
-                            <param-name>jakarta.ws.rs.Application</param-name>
-                            <param-value>%s.%sApplication</param-value>
-                        </init-param>
-                        <load-on-startup>1</load-on-startup>
-                    </servlet>
-                    <servlet-mapping>
-                        <servlet-name>Jersey Servlet</servlet-name>
-                        <url-pattern>/api/*</url-pattern>
-                    </servlet-mapping>
-                </web-app>
-                """, packagePath, JerseyGenerationContext.getAPITitle(ctx.spec).replaceAll("[^a-zA-Z0-9]", ""));
+        String wsApplication = ctx.wsNs + ".Application";
+
+        if (ctx.useJakarta) {
+            return String.format("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                             xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee
+                             https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
+                             version="6.0">
+                        <servlet>
+                            <servlet-name>Jersey Servlet</servlet-name>
+                            <servlet-class>org.glassfish.jersey.servlet.ServletContainer</servlet-class>
+                            <init-param>
+                                <param-name>%s</param-name>
+                                <param-value>%s.%sApplication</param-value>
+                            </init-param>
+                            <load-on-startup>1</load-on-startup>
+                        </servlet>
+                        <servlet-mapping>
+                            <servlet-name>Jersey Servlet</servlet-name>
+                            <url-pattern>/api/*</url-pattern>
+                        </servlet-mapping>
+                    </web-app>
+                    """, wsApplication, packagePath, JerseyGenerationContext.getAPITitle(ctx.spec).replaceAll("[^a-zA-Z0-9]", ""));
+        } else {
+            return String.format("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                             xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee
+                             http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd"
+                             version="4.0">
+                        <servlet>
+                            <servlet-name>Jersey Servlet</servlet-name>
+                            <servlet-class>org.glassfish.jersey.servlet.ServletContainer</servlet-class>
+                            <init-param>
+                                <param-name>%s</param-name>
+                                <param-value>%s.%sApplication</param-value>
+                            </init-param>
+                            <load-on-startup>1</load-on-startup>
+                        </servlet>
+                        <servlet-mapping>
+                            <servlet-name>Jersey Servlet</servlet-name>
+                            <url-pattern>/api/*</url-pattern>
+                        </servlet-mapping>
+                    </web-app>
+                    """, wsApplication, packagePath, JerseyGenerationContext.getAPITitle(ctx.spec).replaceAll("[^a-zA-Z0-9]", ""));
+        }
     }
 }

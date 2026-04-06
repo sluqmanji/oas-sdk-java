@@ -237,6 +237,9 @@ mvn clean package -DskipTests
 # Generate a Jersey application from an OpenAPI spec
 java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar generate openapi.yaml -l java -f jersey -p com.example.api -o ./generated
 
+# Generate with Jakarta EE namespace (jakarta.*) instead of Java EE (javax.*)
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar generate openapi.yaml -l java -f jersey -p com.example.api -o ./generated --jakarta
+
 # Generate test suites
 java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar tests openapi.yaml -t unit,integration -o ./generated/tests
 
@@ -245,6 +248,9 @@ java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar mockdata openapi.yaml -o ./genera
 
 # Generate everything (application, tests, mock data, docs)
 java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar all openapi.yaml -l java -f jersey -o ./generated
+
+# Generate everything with Jakarta EE namespace
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar all openapi.yaml -l java -f jersey -o ./generated --jakarta
 
 # Validate a specification
 java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar validate openapi.yaml
@@ -590,7 +596,47 @@ public class ConfiguredExample {
 }
 ```
 
-### 7. Built-in Observability
+### 7. Jakarta EE vs Java EE Namespace
+
+By default, generated Java code uses the **Java EE (`javax.*`)** namespace for annotations and APIs such as `javax.ws.rs`, `javax.validation`, `javax.xml.bind`, and `javax.inject`. This is compatible with Jersey 2.x, Java EE 8, and older application servers.
+
+To generate code using the **Jakarta EE (`jakarta.*`)** namespace (required for Jersey 3.x, Jakarta EE 9+, and modern application servers like Tomcat 10+, WildFly 27+, etc.), use the `--jakarta` CLI flag or the `useJakartaNamespace(true)` builder option.
+
+**CLI:**
+```bash
+# Generate with Jakarta EE namespace
+java -jar target/oas-sdk-java-2.1-SNAPSHOT.jar generate openapi.yaml --jakarta -p com.example.api -o ./generated
+```
+
+**Programmatic:**
+```java
+GeneratorConfig config = GeneratorConfig.builder()
+    .language("java")
+    .framework("jersey")
+    .packageName("com.example.api")
+    .useJakartaNamespace(true)   // Use jakarta.* instead of javax.*
+    .build();
+
+try (OASSDK sdk = new OASSDK(config, null, null)) {
+    sdk.loadSpec("openapi.yaml");
+    sdk.generateApplication("java", "jersey", "com.example.api", "./generated");
+}
+```
+
+**What changes with `--jakarta`:**
+
+| Area | `javax` (default) | `jakarta` (`--jakarta`) |
+|------|-------------------|------------------------|
+| JAX-RS imports | `javax.ws.rs.*` | `jakarta.ws.rs.*` |
+| Validation imports | `javax.validation.*` | `jakarta.validation.*` |
+| XML Bind imports | `javax.xml.bind.*` | `jakarta.xml.bind.*` |
+| Inject imports | `javax.inject.*` | `jakarta.inject.*` |
+| Servlet API | `javax.servlet-api 4.0.1` | `jakarta.servlet-api 6.0.0` |
+| JAXB API | `javax.xml.bind-api 2.3.1` | `jakarta.xml.bind-api 4.0.0` |
+| Hibernate Validator | `6.2.5.Final` | `8.0.1.Final` |
+| web.xml schema | Java EE (`web-app_4_0.xsd`) | Jakarta EE (`web-app_6_0.xsd`) |
+
+### 8. Built-in Observability
 
 Every generated application includes OpenTelemetry distributed tracing and Micrometer metrics out of the box. This is enabled by default and can be controlled via `ObservabilityConfig`.
 

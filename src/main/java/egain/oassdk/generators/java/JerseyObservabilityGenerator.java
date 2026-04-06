@@ -51,12 +51,12 @@ class JerseyObservabilityGenerator {
                 import io.micrometer.prometheus.PrometheusMeterRegistry;
                 import io.micrometer.prometheus.PrometheusConfig;
                 import io.micrometer.core.instrument.Timer;
-                import jakarta.inject.Singleton;
-                import jakarta.ws.rs.container.ContainerRequestContext;
-                import jakarta.ws.rs.container.ContainerRequestFilter;
-                import jakarta.ws.rs.container.ContainerResponseContext;
-                import jakarta.ws.rs.container.ContainerResponseFilter;
-                import jakarta.ws.rs.ext.Provider;
+                import %s.Singleton;
+                import %s.container.ContainerRequestContext;
+                import %s.container.ContainerRequestFilter;
+                import %s.container.ContainerResponseContext;
+                import %s.container.ContainerResponseFilter;
+                import %s.ext.Provider;
                 import java.io.IOException;
                 import java.time.Duration;
 
@@ -102,7 +102,7 @@ class JerseyObservabilityGenerator {
                         return registry;
                     }
                 }
-                """, obsPackage);
+                """, obsPackage, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
         writeFile(obsDir + "/MetricsFilter.java", metricsFilter);
 
         // --- TracingFilter.java ---
@@ -117,12 +117,12 @@ class JerseyObservabilityGenerator {
                 import io.opentelemetry.context.Context;
                 import io.opentelemetry.context.Scope;
                 import io.opentelemetry.context.propagation.TextMapGetter;
-                import jakarta.inject.Singleton;
-                import jakarta.ws.rs.container.ContainerRequestContext;
-                import jakarta.ws.rs.container.ContainerRequestFilter;
-                import jakarta.ws.rs.container.ContainerResponseContext;
-                import jakarta.ws.rs.container.ContainerResponseFilter;
-                import jakarta.ws.rs.ext.Provider;
+                import %s.Singleton;
+                import %s.container.ContainerRequestContext;
+                import %s.container.ContainerRequestFilter;
+                import %s.container.ContainerResponseContext;
+                import %s.container.ContainerResponseFilter;
+                import %s.ext.Provider;
                 import java.io.IOException;
                 import java.util.Collections;
 
@@ -186,18 +186,18 @@ class JerseyObservabilityGenerator {
                         }
                     }
                 }
-                """, obsPackage);
+                """, obsPackage, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
         writeFile(obsDir + "/TracingFilter.java", tracingFilter);
 
         // --- MetricsEndpoint.java ---
         String metricsEndpoint = String.format("""
                 package %s;
 
-                import jakarta.inject.Inject;
-                import jakarta.inject.Singleton;
-                import jakarta.ws.rs.GET;
-                import jakarta.ws.rs.Path;
-                import jakarta.ws.rs.Produces;
+                import %s.Inject;
+                import %s.Singleton;
+                import %s.GET;
+                import %s.Path;
+                import %s.Produces;
 
                 @Path("/metrics")
                 @Singleton
@@ -212,7 +212,7 @@ class JerseyObservabilityGenerator {
                         return metricsFilter.getRegistry().scrape();
                     }
                 }
-                """, obsPackage);
+                """, obsPackage, ctx.injectNs, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
         writeFile(obsDir + "/MetricsEndpoint.java", metricsEndpoint);
 
         // --- ObservabilityBootstrap.java ---
