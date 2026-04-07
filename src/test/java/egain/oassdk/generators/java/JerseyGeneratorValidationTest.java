@@ -284,7 +284,7 @@ public class JerseyGeneratorValidationTest {
     }
 
     @Test
-    @DisplayName("Pattern with grouping parentheses is not escaped (e.g. optional milliseconds in date-time)")
+    @DisplayName("Pattern with grouping parentheses is not escaped (plain string field, ISO-8601-style regex)")
     public void testPatternGroupingParenthesesNotEscaped() throws OASSDKException, IOException {
         Path outputDir = tempOutputDir.resolve("datetime-pattern-test");
         String packageName = "com.test.api";
@@ -314,7 +314,6 @@ public class JerseyGeneratorValidationTest {
                   properties:
                     modifiedDate:
                       type: string
-                      format: date-time
                       pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$'
                       minLength: 20
                       maxLength: 25

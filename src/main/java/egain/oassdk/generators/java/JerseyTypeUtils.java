@@ -442,6 +442,14 @@ class JerseyTypeUtils {
     // ---------------------------------------------------------------------------
 
     /**
+     * OpenAPI string formats that map to {@code XMLGregorianCalendar} in {@link #getJavaType}.
+     * CharSequence-only Bean Validation annotations must not be applied to those fields.
+     */
+    private static boolean isOpenApiStringTemporalFormat(String format) {
+        return "date".equals(format) || "date-time".equals(format);
+    }
+
+    /**
      * Generate validation annotations based on OpenAPI schema constraints.
      */
     String generateValidationAnnotations(Map<String, Object> schema, boolean isRequired) {
@@ -478,70 +486,71 @@ class JerseyTypeUtils {
         switch (type) {
             case "string" -> {
                 String format = (String) schema.get("format");
+                if (!isOpenApiStringTemporalFormat(format)) {
+                    // Email format
+                    if ("email".equals(format)) {
+                        annotations.append("@Email\n    ");
+                    }
 
-                // Email format
-                if ("email".equals(format)) {
-                    annotations.append("@Email\n    ");
-                }
+                    // Enum validation - must be checked before pattern to avoid conflicts
+                    List<?> enumValues = schema.get("enum") instanceof List<?> list ? list : null;
+                    boolean hasEnum = enumValues != null && !enumValues.isEmpty();
 
-                // Enum validation - must be checked before pattern to avoid conflicts
-                List<?> enumValues = schema.get("enum") instanceof List<?> list ? list : null;
-                boolean hasEnum = enumValues != null && !enumValues.isEmpty();
-
-                if (hasEnum && enumValues != null) {
-                    StringBuilder enumPattern = new StringBuilder();
-                    for (int i = 0; i < enumValues.size(); i++) {
-                        if (i > 0) {
-                            enumPattern.append("|");
+                    if (hasEnum && enumValues != null) {
+                        StringBuilder enumPattern = new StringBuilder();
+                        for (int i = 0; i < enumValues.size(); i++) {
+                            if (i > 0) {
+                                enumPattern.append("|");
+                            }
+                            String enumValue = enumValues.get(i).toString();
+                            enumValue = enumValue.replace("\\", "\\\\")
+                                    .replace("^", "\\^")
+                                    .replace("$", "\\$")
+                                    .replace(".", "\\.")
+                                    .replace("|", "\\|")
+                                    .replace("?", "\\?")
+                                    .replace("*", "\\*")
+                                    .replace("+", "\\+")
+                                    .replace("(", "\\(")
+                                    .replace(")", "\\)")
+                                    .replace("[", "\\[")
+                                    .replace("]", "\\]")
+                                    .replace("{", "\\{")
+                                    .replace("}", "\\}")
+                                    .replace("\"", "\\\"");
+                            enumPattern.append("(").append(enumValue).append(")");
                         }
-                        String enumValue = enumValues.get(i).toString();
-                        enumValue = enumValue.replace("\\", "\\\\")
-                                .replace("^", "\\^")
-                                .replace("$", "\\$")
-                                .replace(".", "\\.")
-                                .replace("|", "\\|")
-                                .replace("?", "\\?")
-                                .replace("*", "\\*")
-                                .replace("+", "\\+")
-                                .replace("(", "\\(")
-                                .replace(")", "\\)")
-                                .replace("[", "\\[")
-                                .replace("]", "\\]")
-                                .replace("{", "\\{")
-                                .replace("}", "\\}")
-                                .replace("\"", "\\\"");
-                        enumPattern.append("(").append(enumValue).append(")");
+                        String enumPatternStr = JerseyNamingUtils.escapePatternForJavaStringLiteral(enumPattern.toString());
+                        annotations.append("@Pattern(regexp = \"").append(enumPatternStr).append("\")\n    ");
                     }
-                    String enumPatternStr = JerseyNamingUtils.escapePatternForJavaStringLiteral(enumPattern.toString());
-                    annotations.append("@Pattern(regexp = \"").append(enumPatternStr).append("\")\n    ");
-                }
 
-                // Pattern validation (only if enum is not present, as enum takes precedence)
-                if (!hasEnum) {
-                    Object patternObj = schema.get("pattern");
-                    if (patternObj != null) {
-                        String pattern = patternObj.toString();
-                        annotations.append("@Pattern(regexp = \"").append(JerseyNamingUtils.escapePatternForJavaStringLiteral(pattern)).append("\")\n    ");
+                    // Pattern validation (only if enum is not present, as enum takes precedence)
+                    if (!hasEnum) {
+                        Object patternObj = schema.get("pattern");
+                        if (patternObj != null) {
+                            String pattern = patternObj.toString();
+                            annotations.append("@Pattern(regexp = \"").append(JerseyNamingUtils.escapePatternForJavaStringLiteral(pattern)).append("\")\n    ");
+                        }
                     }
-                }
 
-                // Min and max length together (preferred)
-                Object minLengthObj = schema.get("minLength");
-                Object maxLengthObj = schema.get("maxLength");
-                if (minLengthObj != null && maxLengthObj != null) {
-                    int minLength = getIntValue(minLengthObj);
-                    int maxLength = getIntValue(maxLengthObj);
-                    annotations.append("@Size(min = ").append(minLength).append(", max = ").append(maxLength).append(")\n    ");
-                } else {
-                    if (minLengthObj != null) {
+                    // Min and max length together (preferred)
+                    Object minLengthObj = schema.get("minLength");
+                    Object maxLengthObj = schema.get("maxLength");
+                    if (minLengthObj != null && maxLengthObj != null) {
                         int minLength = getIntValue(minLengthObj);
-                        if (minLength > 0) {
-                            annotations.append("@Size(min = ").append(minLength).append(")\n    ");
-                        }
-                    }
-                    if (maxLengthObj != null) {
                         int maxLength = getIntValue(maxLengthObj);
-                        annotations.append("@Size(max = ").append(maxLength).append(")\n    ");
+                        annotations.append("@Size(min = ").append(minLength).append(", max = ").append(maxLength).append(")\n    ");
+                    } else {
+                        if (minLengthObj != null) {
+                            int minLength = getIntValue(minLengthObj);
+                            if (minLength > 0) {
+                                annotations.append("@Size(min = ").append(minLength).append(")\n    ");
+                            }
+                        }
+                        if (maxLengthObj != null) {
+                            int maxLength = getIntValue(maxLengthObj);
+                            annotations.append("@Size(max = ").append(maxLength).append(")\n    ");
+                        }
                     }
                 }
             }
@@ -686,9 +695,15 @@ class JerseyTypeUtils {
 
     boolean isEligibleForCascadingValidation(String fieldType) {
         if (fieldType == null) return false;
+        if ("XMLGregorianCalendar".equals(fieldType)) {
+            return false;
+        }
         // if fieldType starts with List< then check the inner type for eligibility
         if (fieldType.startsWith("List<") && fieldType.endsWith(">")) {
             String innerType = fieldType.substring(5, fieldType.length() - 1);
+            if ("XMLGregorianCalendar".equals(innerType)) {
+                return false;
+            }
             return !isJavaPrimitiveOrBoxed(innerType);
         }
         // Add @Valid for non-primitive, non-boxed types (e.g. custom classes, lists)
