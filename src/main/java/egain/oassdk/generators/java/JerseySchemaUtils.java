@@ -158,6 +158,79 @@ final class JerseySchemaUtils {
     }
 
     /**
+     * Merge two JSON-Schema property definition maps as sequential {@code allOf} branches would:
+     * {@code earlier} is merged first, then {@code later}. The result favours {@code later} for type
+     * and constraints, but preserves {@code readOnly}/{@code writeOnly} from {@code earlier} when
+     * {@code later} omits those keys and the earlier flag is true.
+     */
+    static Map<String, Object> mergePropertyDefinitionsForComposition(Map<String, Object> earlier,
+                                                                        Map<String, Object> later) {
+        if (later == null || later.isEmpty()) {
+            return earlier != null ? new LinkedHashMap<>(earlier) : new LinkedHashMap<>();
+        }
+        Map<String, Object> out = new LinkedHashMap<>(later);
+        if (earlier != null) {
+            if (!later.containsKey("readOnly") && isSchemaFlagTrue(earlier, "readOnly")) {
+                out.put("readOnly", true);
+            }
+            if (!later.containsKey("writeOnly") && isSchemaFlagTrue(earlier, "writeOnly")) {
+                out.put("writeOnly", true);
+            }
+            Map<String, Object> laterProps = Util.asStringObjectMap(later.get("properties"));
+            Map<String, Object> earlierProps = Util.asStringObjectMap(earlier.get("properties"));
+            if (earlierProps != null && !earlierProps.isEmpty()) {
+                Map<String, Object> mergedProps = new LinkedHashMap<>();
+                if (laterProps != null) {
+                    mergedProps.putAll(laterProps);
+                }
+                for (Map.Entry<String, Object> pe : earlierProps.entrySet()) {
+                    String pk = pe.getKey();
+                    Map<String, Object> eSub = Util.asStringObjectMap(pe.getValue());
+                    if (!mergedProps.containsKey(pk)) {
+                        mergedProps.put(pk, pe.getValue());
+                    } else {
+                        Map<String, Object> lSub = Util.asStringObjectMap(mergedProps.get(pk));
+                        if (eSub != null && lSub != null) {
+                            mergedProps.put(pk, mergePropertyDefinitionsForComposition(eSub, lSub));
+                        } else {
+                            mergedProps.put(pk, pe.getValue());
+                        }
+                    }
+                }
+                out.put("properties", mergedProps);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Merge a schema {@code properties} map into {@code allProperties}, deep-merging when a property
+     * name already exists so readOnly/writeOnly overlays are not dropped.
+     */
+    private static void mergePropertiesIntoAll(Map<String, Object> allProperties,
+                                               Map<String, Object> properties) {
+        if (properties == null) {
+            return;
+        }
+        for (Map.Entry<String, Object> e : properties.entrySet()) {
+            String name = e.getKey();
+            Object incomingObj = e.getValue();
+            Map<String, Object> incoming = Util.asStringObjectMap(incomingObj);
+            if (!allProperties.containsKey(name)) {
+                allProperties.put(name, incomingObj);
+                continue;
+            }
+            Object existingObj = allProperties.get(name);
+            Map<String, Object> existing = Util.asStringObjectMap(existingObj);
+            if (existing == null || incoming == null) {
+                allProperties.put(name, incomingObj);
+            } else {
+                allProperties.put(name, mergePropertyDefinitionsForComposition(existing, incoming));
+            }
+        }
+    }
+
+    /**
      * Merge schema properties into the allProperties map.
      */
     static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
@@ -201,9 +274,7 @@ final class JerseySchemaUtils {
         if (schema.containsKey("properties")) {
             // Schema has properties - use them directly (even if $ref also exists)
             Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-            if (properties != null) {
-                allProperties.putAll(properties);
-            }
+            mergePropertiesIntoAll(allProperties, properties);
             // Merge required fields
             if (schema.containsKey("required")) {
                 List<String> required = Util.asStringList(schema.get("required"));
@@ -263,9 +334,7 @@ final class JerseySchemaUtils {
         // Merge direct properties (this handles schemas that were resolved and have properties)
         if (schema.containsKey("properties")) {
             Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-            if (properties != null) {
-                allProperties.putAll(properties);
-            }
+            mergePropertiesIntoAll(allProperties, properties);
             // Merge required fields
             if (schema.containsKey("required")) {
                 List<String> required = Util.asStringList(schema.get("required"));
@@ -314,9 +383,7 @@ final class JerseySchemaUtils {
         // Merge direct properties
         if (schema.containsKey("properties")) {
             Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
-            if (properties != null) {
-                allProperties.putAll(properties);
-            }
+            mergePropertiesIntoAll(allProperties, properties);
         }
 
         // Merge required fields

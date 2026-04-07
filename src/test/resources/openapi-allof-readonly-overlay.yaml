@@ -1,0 +1,26 @@
+openapi: 3.0.0
+info:
+  title: allOf readOnly overlay test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    BaseThing:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        path:
+          type: string
+        name:
+          type: string
+    CreateThing:
+      allOf:
+        - type: object
+          properties:
+            id:
+              readOnly: true
+            path:
+              readOnly: true
+        - $ref: '#/components/schemas/BaseThing'
