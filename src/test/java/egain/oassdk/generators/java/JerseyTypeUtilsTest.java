@@ -309,4 +309,46 @@ class JerseyTypeUtilsTest {
         String annotations = createTypeUtils().generateValidationAnnotations(schema, false);
         assertTrue(annotations.contains("@Min(value = 0)"));
     }
+
+    @Test
+    @DisplayName("generateValidationAnnotations skips CharSequence constraints for format date-time (maps to XMLGregorianCalendar)")
+    void generateValidationAnnotations_dateTime_skipsPatternAndSize() {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "string");
+        schema.put("format", "date-time");
+        schema.put("pattern", "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$");
+        schema.put("minLength", 20);
+        schema.put("maxLength", 24);
+        String annotations = createTypeUtils().generateValidationAnnotations(schema, false);
+        assertFalse(annotations.contains("@Pattern"));
+        assertFalse(annotations.contains("@Size"));
+        assertFalse(annotations.contains("@NotNull"));
+    }
+
+    @Test
+    @DisplayName("generateValidationAnnotations for format date-time required adds only @NotNull")
+    void generateValidationAnnotations_dateTime_required() {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "string");
+        schema.put("format", "date-time");
+        schema.put("pattern", "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$");
+        schema.put("minLength", 20);
+        schema.put("maxLength", 24);
+        String annotations = createTypeUtils().generateValidationAnnotations(schema, true);
+        assertTrue(annotations.contains("@NotNull"));
+        assertFalse(annotations.contains("@Pattern"));
+        assertFalse(annotations.contains("@Size"));
+    }
+
+    @Test
+    @DisplayName("isEligibleForCascadingValidation returns false for XMLGregorianCalendar")
+    void isEligibleForCascadingValidation_xmlGregorianCalendar() {
+        assertFalse(createTypeUtils().isEligibleForCascadingValidation("XMLGregorianCalendar"));
+    }
+
+    @Test
+    @DisplayName("isEligibleForCascadingValidation returns false for List of XMLGregorianCalendar")
+    void isEligibleForCascadingValidation_listOfXmlGregorianCalendar() {
+        assertFalse(createTypeUtils().isEligibleForCascadingValidation("List<XMLGregorianCalendar>"));
+    }
 }
