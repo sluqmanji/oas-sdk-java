@@ -132,7 +132,40 @@ public class SchemathesisTestRunner {
                 # Generate report
                 echo "Generating test report..."
                 schemathesis report basic-test-results.json stateful-test-results.json negative-test-results.json performance-test-results.json --output=test-report.html
-                
+
+                # Display API endpoint coverage summary
+                echo ""
+                echo "=============================================="
+                echo "       API Endpoint Coverage Summary"
+                echo "=============================================="
+                if [ -f basic-test-results.json ]; then
+                    total=$(python3 -c "
+                import json, sys
+                try:
+                    data = json.load(open('basic-test-results.json'))
+                    stats = data.get('statistics', data.get('stats', {}))
+                    total = stats.get('total', 'N/A')
+                    passed = stats.get('passed', stats.get('success', 'N/A'))
+                    failed = stats.get('failed', stats.get('failures', 'N/A'))
+                    errors = stats.get('errors', stats.get('error', 'N/A'))
+                    print(f'Total tests executed: {total}')
+                    print(f'Passed:               {passed}')
+                    print(f'Failed:               {failed}')
+                    print(f'Errors:               {errors}')
+                    if isinstance(total, int) and total > 0 and isinstance(passed, int):
+                        pct = (passed / total) * 100
+                        print(f'Pass rate:            {pct:.1f}%%')
+                except Exception as e:
+                    print(f'Could not parse results: {e}')
+                " 2>/dev/null)
+                    echo "$total"
+                else
+                    echo "No results file found."
+                fi
+                echo "=============================================="
+                echo "HTML report: test-report.html"
+                echo "=============================================="
+
                 echo "Schemathesis tests completed!"
                 echo "Results saved to: test-report.html"
                 """.formatted(baseUrl, baseUrl, baseUrl, baseUrl, baseUrl);

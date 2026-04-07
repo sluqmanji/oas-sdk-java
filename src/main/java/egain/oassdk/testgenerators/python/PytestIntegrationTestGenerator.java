@@ -463,7 +463,7 @@ public class PytestIntegrationTestGenerator implements TestGenerator, Configurab
         String configContent = "# Integration Test Configuration\n" +
                 "# Generated from OpenAPI specification\n\n" +
                 "[pytest]\n" +
-                "addopts = -v --tb=short --strict-markers\n" +
+                "addopts = -v --tb=short --strict-markers --cov=. --cov-report=term-missing --cov-report=html:coverage_html\n" +
                 "testpaths = .\n" +
                 "python_files = test_*.py\n" +
                 "python_classes = Test*\n" +

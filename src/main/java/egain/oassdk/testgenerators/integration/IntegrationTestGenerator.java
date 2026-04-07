@@ -60,6 +60,9 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
             // Generate test utilities
             generateTestUtilities(outputPath.toString(), basePackage);
 
+            // Generate pom.xml with JaCoCo for code coverage reporting
+            generatePomXml(outputPath.toString(), basePackage);
+
         } catch (Exception e) {
             throw new GenerationException("Failed to generate integration tests: " + e.getMessage(), e);
         }
@@ -770,6 +773,71 @@ public class IntegrationTestGenerator implements TestGenerator, ConfigurableTest
                 "# integrationMaxInvalidParamCasesPerOperation=25\n";
 
         Files.write(Paths.get(outputDir, "test-config.properties"), configContent.getBytes());
+    }
+
+    private void generatePomXml(String outputDir, String basePackage) throws IOException {
+        String pomContent = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+                    <modelVersion>4.0.0</modelVersion>
+
+                    <groupId>%s</groupId>
+                    <artifactId>api-integration-tests</artifactId>
+                    <version>1.0.0</version>
+                    <packaging>jar</packaging>
+
+                    <properties>
+                        <maven.compiler.source>21</maven.compiler.source>
+                        <maven.compiler.target>21</maven.compiler.target>
+                        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+                        <junit.version>5.10.0</junit.version>
+                        <jacoco.version>0.8.11</jacoco.version>
+                    </properties>
+
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.junit.jupiter</groupId>
+                            <artifactId>junit-jupiter</artifactId>
+                            <version>${junit.version}</version>
+                            <scope>test</scope>
+                        </dependency>
+                    </dependencies>
+
+                    <build>
+                        <plugins>
+                            <plugin>
+                                <groupId>org.apache.maven.plugins</groupId>
+                                <artifactId>maven-surefire-plugin</artifactId>
+                                <version>3.2.2</version>
+                            </plugin>
+                            <plugin>
+                                <groupId>org.jacoco</groupId>
+                                <artifactId>jacoco-maven-plugin</artifactId>
+                                <version>${jacoco.version}</version>
+                                <executions>
+                                    <execution>
+                                        <id>prepare-agent</id>
+                                        <goals>
+                                            <goal>prepare-agent</goal>
+                                        </goals>
+                                    </execution>
+                                    <execution>
+                                        <id>report</id>
+                                        <phase>test</phase>
+                                        <goals>
+                                            <goal>report</goal>
+                                        </goals>
+                                    </execution>
+                                </executions>
+                            </plugin>
+                        </plugins>
+                    </build>
+                </project>
+                """.formatted(basePackage);
+
+        Files.write(Paths.get(outputDir, "pom.xml"), pomContent.getBytes());
     }
 
     /**

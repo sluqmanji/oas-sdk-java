@@ -40,6 +40,9 @@ public class PytestUnitTestGenerator implements TestGenerator, ConfigurableTestG
             // Generate conftest.py for pytest fixtures
             generateConftest(outputPath.toString());
 
+            // Generate pytest.ini with coverage configuration
+            generatePytestConfig(outputPath.toString());
+
             // Generate requirements.txt
             generateRequirements(outputPath.toString());
 
@@ -288,6 +291,24 @@ public class PytestUnitTestGenerator implements TestGenerator, ConfigurableTestG
                 "pytest-mock>=3.10.0\n";
 
         Files.write(Paths.get(outputDir, "requirements.txt"), requirements.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Generate pytest.ini with code coverage configuration
+     */
+    private void generatePytestConfig(String outputDir) throws IOException {
+        String configContent = "# Pytest configuration with code coverage\n" +
+                "# Generated from OpenAPI specification\n\n" +
+                "[pytest]\n" +
+                "addopts = -v --tb=short --strict-markers --cov=. --cov-report=term-missing --cov-report=html:coverage_html\n" +
+                "testpaths = .\n" +
+                "python_files = test_*.py\n" +
+                "python_classes = Test*\n" +
+                "python_functions = test_*\n" +
+                "markers =\n" +
+                "    unit: Unit tests\n";
+
+        Files.write(Paths.get(outputDir, "pytest.ini"), configContent.getBytes(StandardCharsets.UTF_8));
     }
 
     // Helper methods

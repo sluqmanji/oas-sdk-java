@@ -248,7 +248,15 @@ public class JestUnitTestGenerator implements TestGenerator, ConfigurableTestGen
         sb.append("  verbose: true,\n");
         sb.append("  collectCoverage: true,\n");
         sb.append("  coverageDirectory: 'coverage',\n");
-        sb.append("  coverageReporters: ['text', 'lcov', 'html'],\n");
+        sb.append("  coverageReporters: ['text', 'text-summary', 'lcov', 'html'],\n");
+        sb.append("  coverageThreshold: {\n");
+        sb.append("    global: {\n");
+        sb.append("      branches: 0,\n");
+        sb.append("      functions: 0,\n");
+        sb.append("      lines: 0,\n");
+        sb.append("      statements: 0,\n");
+        sb.append("    },\n");
+        sb.append("  },\n");
         sb.append("};\n");
 
         Files.write(Paths.get(outputDir, "jest.config.js"), sb.toString().getBytes(StandardCharsets.UTF_8));
