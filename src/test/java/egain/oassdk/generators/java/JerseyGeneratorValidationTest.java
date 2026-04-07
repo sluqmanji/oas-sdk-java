@@ -734,6 +734,29 @@ public class JerseyGeneratorValidationTest {
     }
 
     @Test
+    @DisplayName("readOnly on allOf overlay is preserved when base schema redefines same property names")
+    public void testAllOfReadOnlyPropertyOverlayOnCreateModel() throws OASSDKException, IOException {
+        Path outputDir = tempOutputDir.resolve("allof-readonly-overlay-test");
+        String yamlFile = "src/test/resources/openapi-allof-readonly-overlay.yaml";
+        String packageName = "com.test.api";
+
+        OASSDK sdk = new OASSDK();
+        sdk.loadSpec(yamlFile);
+        sdk.generateApplication("java", "jersey", packageName, outputDir.toString());
+
+        Path modelFile = outputDir.resolve("src/main/java/com/test/api/model/CreateThing.java");
+        assertTrue(Files.exists(modelFile), "CreateThing model should be generated");
+
+        String content = Files.readString(modelFile);
+        assertTrue(content.contains("@JsonProperty(access = JsonProperty.Access.READ_ONLY)"),
+            "Overlay readOnly should produce JsonProperty READ_ONLY");
+        assertTrue(content.contains("public String getId()"), "id should have getter");
+        assertFalse(content.contains("public void setId("), "readOnly id should not have public setter");
+        assertTrue(content.contains("public String getPath()"), "path should have getter");
+        assertFalse(content.contains("public void setPath("), "readOnly path should not have public setter");
+    }
+
+    @Test
     @DisplayName("Test that boolean/Boolean properties use isXxx() getter prefix not getXxx()")
     public void testBooleanGetterUsesIsPrefix() throws OASSDKException, IOException {
         String yamlContent = """

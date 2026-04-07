@@ -1,9 +1,11 @@
 package egain.oassdk.generators.java;
 
+import egain.oassdk.Util;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -247,6 +249,99 @@ class JerseySchemaUtilsTest {
 
         assertTrue(allProps.containsKey("name"));
         assertTrue(allRequired.contains("name"));
+    }
+
+    @Test
+    @DisplayName("mergePropertyDefinitionsForComposition keeps readOnly from earlier branch when later omits it")
+    void mergePropertyDefinitions_mergeReadOnlyOverlay() {
+        Map<String, Object> earlier = Map.of("readOnly", true);
+        Map<String, Object> later = new LinkedHashMap<>();
+        later.put("type", "string");
+        later.put("pattern", "^[0-9]+$");
+
+        Map<String, Object> merged = JerseySchemaUtils.mergePropertyDefinitionsForComposition(earlier, later);
+
+        assertTrue(JerseySchemaUtils.isSchemaFlagTrue(merged, "readOnly"));
+        assertEquals("string", merged.get("type"));
+        assertEquals("^[0-9]+$", merged.get("pattern"));
+    }
+
+    @Test
+    @DisplayName("mergePropertyDefinitionsForComposition keeps writeOnly from earlier when later omits it")
+    void mergePropertyDefinitions_mergeWriteOnlyOverlay() {
+        Map<String, Object> earlier = Map.of("writeOnly", true);
+        Map<String, Object> later = Map.of("type", "string");
+
+        Map<String, Object> merged = JerseySchemaUtils.mergePropertyDefinitionsForComposition(earlier, later);
+
+        assertTrue(JerseySchemaUtils.isSchemaFlagTrue(merged, "writeOnly"));
+        assertEquals("string", merged.get("type"));
+    }
+
+    @Test
+    @DisplayName("mergePropertyDefinitionsForComposition later explicit readOnly false overrides earlier true")
+    void mergePropertyDefinitions_laterReadOnlyFalseWins() {
+        Map<String, Object> earlier = Map.of("readOnly", true);
+        Map<String, Object> later = new LinkedHashMap<>();
+        later.put("type", "string");
+        later.put("readOnly", false);
+
+        Map<String, Object> merged = JerseySchemaUtils.mergePropertyDefinitionsForComposition(earlier, later);
+
+        assertFalse(JerseySchemaUtils.isSchemaFlagTrue(merged, "readOnly"));
+    }
+
+    @Test
+    @DisplayName("mergePropertyDefinitionsForComposition merges nested properties readOnly overlay")
+    void mergePropertyDefinitions_nestedProperties() {
+        Map<String, Object> earlier = Map.of(
+                "properties", Map.of("user", Map.of("readOnly", true)));
+        Map<String, Object> later = Map.of(
+                "properties", Map.of("user", Map.of("type", "string")));
+
+        Map<String, Object> merged = JerseySchemaUtils.mergePropertyDefinitionsForComposition(earlier, later);
+        Map<String, Object> props = Util.asStringObjectMap(merged.get("properties"));
+        assertNotNull(props);
+        Map<String, Object> user = Util.asStringObjectMap(props.get("user"));
+        assertNotNull(user);
+        assertTrue(JerseySchemaUtils.isSchemaFlagTrue(user, "readOnly"));
+        assertEquals("string", user.get("type"));
+    }
+
+    @Test
+    @DisplayName("mergeSchemaProperties preserves readOnly from first allOf branch when second branch redefines property")
+    void mergeSchemaProperties_allOf_preservesReadOnlyOverlay() {
+        Map<String, Object> folder = new LinkedHashMap<>();
+        folder.put("type", "object");
+        Map<String, Object> folderProps = new LinkedHashMap<>();
+        folderProps.put("id", Map.of("type", "string", "minLength", 14));
+        folder.put("properties", folderProps);
+
+        Map<String, Object> schemas = new LinkedHashMap<>();
+        schemas.put("Folder", folder);
+
+        Map<String, Object> overlay = new LinkedHashMap<>();
+        overlay.put("type", "object");
+        Map<String, Object> overlayProps = new LinkedHashMap<>();
+        overlayProps.put("id", Map.of("readOnly", true));
+        overlay.put("properties", overlayProps);
+
+        Map<String, Object> createFolder = new LinkedHashMap<>();
+        createFolder.put("allOf", List.of(overlay, Map.of("$ref", "#/components/schemas/Folder")));
+
+        schemas.put("CreateFolder", createFolder);
+
+        Map<String, Object> spec = Map.of("components", Map.of("schemas", schemas));
+
+        Map<String, Object> allProps = new LinkedHashMap<>();
+        List<String> allRequired = new ArrayList<>();
+        JerseySchemaUtils.mergeSchemaProperties(createFolder, allProps, allRequired, spec);
+
+        Map<String, Object> idSchema = Util.asStringObjectMap(allProps.get("id"));
+        assertNotNull(idSchema);
+        assertTrue(JerseySchemaUtils.isSchemaFlagTrue(idSchema, "readOnly"));
+        assertEquals("string", idSchema.get("type"));
+        assertEquals(14, idSchema.get("minLength"));
     }
 
     // -----------------------------------------------------------------------
