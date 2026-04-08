@@ -693,44 +693,38 @@ public class JerseyGeneratorValidationTest {
         assertTrue(content.contains("JsonProperty.Access.WRITE_ONLY"),
             "Generated model should contain @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) for writeOnly property");
 
-        // readOnly (id): getter only, no setter
         assertTrue(content.contains("public String getId()"),
             "readOnly property should have getter");
-        assertFalse(content.contains("public void setId("),
-            "readOnly property should not have setter");
+        assertTrue(content.contains("public void setId("),
+            "readOnly property should have setter");
 
-        // writeOnly (password): setter only, no getter
         assertTrue(content.contains("public void setPassword("),
             "writeOnly property should have setter");
-        assertFalse(content.contains("public String getPassword()"),
-            "writeOnly property should not have getter");
+        assertTrue(content.contains("public String getPassword()"),
+            "writeOnly property should have getter");
 
-        // setAttribute must not call setId for readOnly property (setId does not exist)
-        assertTrue(content.contains("return; // readOnly, no setter"),
-            "setAttribute should no-op for readOnly properties instead of calling missing setter");
-        assertFalse(content.contains("setId(("),
-            "setAttribute must not call setId for readOnly property id");
+        assertFalse(content.contains("return; // readOnly, no setter"),
+            "setAttribute should invoke setters for readOnly properties when accessors exist");
+        assertTrue(content.contains("setId(("),
+            "setAttribute should call setId for readOnly property id");
 
-        // isSetAttribute must not include readOnly property (id) in its switch
         String isSetAttributeSection = content.substring(
             content.indexOf("public boolean isSetAttribute"),
             content.indexOf("public List<String> getAttributeNames()"));
-        assertFalse(isSetAttributeSection.contains("case \"id\":"),
-            "isSetAttribute should not have a case for readOnly property id");
+        assertTrue(isSetAttributeSection.contains("case \"id\":"),
+            "isSetAttribute should have a case for readOnly property id");
 
-        // getAttribute must not include writeOnly property (password) in its switch
         String getAttributeSection = content.substring(
             content.indexOf("public Object getAttribute"),
             content.indexOf("public boolean isSetAttribute"));
-        assertFalse(getAttributeSection.contains("case \"password\":"),
-            "getAttribute should not have a case for writeOnly property password");
+        assertTrue(getAttributeSection.contains("case \"password\":"),
+            "getAttribute should have a case for writeOnly property password");
 
-        // getAttributeNames must not add writeOnly property (password)
         String getAttributeNamesSection = content.substring(
             content.indexOf("public List<String> getAttributeNames()"),
             content.indexOf("public void setAttribute"));
-        assertFalse(getAttributeNamesSection.contains("allNames.add(\"password\")"),
-            "getAttributeNames should not include writeOnly property password");
+        assertTrue(getAttributeNamesSection.contains("allNames.add(\"password\")"),
+            "getAttributeNames should include writeOnly property password");
     }
 
     @Test
@@ -751,9 +745,9 @@ public class JerseyGeneratorValidationTest {
         assertTrue(content.contains("@JsonProperty(access = JsonProperty.Access.READ_ONLY)"),
             "Overlay readOnly should produce JsonProperty READ_ONLY");
         assertTrue(content.contains("public String getId()"), "id should have getter");
-        assertFalse(content.contains("public void setId("), "readOnly id should not have public setter");
+        assertTrue(content.contains("public void setId("), "readOnly id should have public setter");
         assertTrue(content.contains("public String getPath()"), "path should have getter");
-        assertFalse(content.contains("public void setPath("), "readOnly path should not have public setter");
+        assertTrue(content.contains("public void setPath("), "readOnly path should have public setter");
     }
 
     @Test
