@@ -222,6 +222,19 @@ class JerseyModelGenerator {
             }
         }
 
+        // Simple two-branch oneOf: each branch requires exactly one distinct property — merge wrongly unionizes
+        // required/readOnly; strip those for the pair and enforce XOR via @AssertTrue on the bean.
+        Set<String> xorExclusiveJsonNames = Collections.emptySet();
+        String[] oneOfXorPair = null;
+        if (!isArrayType) {
+            oneOfXorPair = JerseyExecutorSpecValidation.findSimpleOneOfXorPair(
+                    schema, spec, new IdentityHashMap<>(), 0);
+            if (oneOfXorPair != null && oneOfXorPair.length == 2) {
+                xorExclusiveJsonNames = Set.of(oneOfXorPair[0], oneOfXorPair[1]);
+                allRequired.removeIf(xorExclusiveJsonNames::contains);
+            }
+        }
+
         List<String> fieldNames = new ArrayList<>(allProperties.keySet());
 
         // Wrappers to generate as static inner classes (object-with-single-array properties)
@@ -351,14 +364,17 @@ class JerseyModelGenerator {
                 }
             } else {
                 content.append("@XmlElement(name = \"").append(fieldName).append("\"");
-                if (allRequired.contains(fieldName)) {
+                boolean effectiveRequired = allRequired.contains(fieldName)
+                        && !xorExclusiveJsonNames.contains(fieldName);
+                if (effectiveRequired) {
                     content.append(", required = true");
                 }
                 content.append(")\n    ");
             }
 
             // Add @JsonProperty for name mapping and/or readOnly/writeOnly access
-            boolean readOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly");
+            boolean isOneOfXorField = xorExclusiveJsonNames.contains(fieldName);
+            boolean readOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly") && !isOneOfXorField;
             boolean writeOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "writeOnly");
             if (readOnly && writeOnly) writeOnly = false;
             String accessStr = null;
@@ -374,7 +390,8 @@ class JerseyModelGenerator {
             }
 
             // Add validation annotations based on schema constraints
-            String validationAnnotations = typeUtils.generateValidationAnnotations(fieldSchema, allRequired.contains(fieldName));
+            boolean effectiveFieldRequired = allRequired.contains(fieldName) && !isOneOfXorField;
+            String validationAnnotations = typeUtils.generateValidationAnnotations(fieldSchema, effectiveFieldRequired);
             if (!validationAnnotations.isEmpty()) {
                 content.append(validationAnnotations);
             }
@@ -436,6 +453,25 @@ class JerseyModelGenerator {
                 } else {
                     content.append("        return (this.").append(javaFieldName).append(" != null);\n");
                 }
+                content.append("    }\n\n");
+            }
+        }
+
+        if (oneOfXorPair != null && oneOfXorPair.length == 2) {
+            String xorJson0 = oneOfXorPair[0];
+            String xorJson1 = oneOfXorPair[1];
+            Map<String, Object> xorSchema0 = Util.asStringObjectMap(allProperties.get(xorJson0));
+            Map<String, Object> xorSchema1 = Util.asStringObjectMap(allProperties.get(xorJson1));
+            String xorType0 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson0, xorSchema0, isArrayType, spec);
+            String xorType1 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson1, xorSchema1, isArrayType, spec);
+            if (!JerseyTypeUtils.isJavaPrimitiveType(xorType0) && !JerseyTypeUtils.isJavaPrimitiveType(xorType1)) {
+                String xorJava0 = JerseyNamingUtils.toModelFieldName(xorJson0);
+                String xorJava1 = JerseyNamingUtils.toModelFieldName(xorJson1);
+                String xorMessage = "Either " + xorJson0 + " or " + xorJson1 + " must be set";
+                content.append("    @XmlTransient\n");
+                content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(xorMessage)).append("\")\n");
+                content.append("    public boolean requiredMutuallyExclusiveFail() {\n");
+                content.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
                 content.append("    }\n\n");
             }
         }

@@ -650,10 +650,6 @@ public class JerseyGeneratorExecutorTest {
         String content = Files.readString(executorFile);
 
         assertTrue(content.contains("L10N_REQUEST_BODY_NOT_PROVIDED"), "Should guard null request body");
-        assertTrue(content.contains("L10N_MUTUALLY_EXCLUSIVE_ATTRIBUTES_PRESENT"),
-            "Should emit oneOf XOR mutual exclusion check");
-        assertTrue(content.contains("isSetDepartment()") && content.contains("isSetParent()"),
-            "Should reference isSet guards for XOR branches");
         assertTrue(content.contains("L10N_UNALLOWED_ATTRIBUTE_PROVIDED_FOR_OPERATION"),
             "Should reject read-only properties");
         assertTrue(content.contains("isSetCreated()") || content.contains("isSetArticles()"),
@@ -668,6 +664,21 @@ public class JerseyGeneratorExecutorTest {
             content.contains("private CreateFolderPayload mCreateFolderPayload")
                 || content.contains("private FolderBase mFolderBase"),
             "Request field should be lower-camel of resolved Java request type");
+
+        Path modelFile = outputDir.resolve("src/main/java/com/test/executorval/model/CreateFolderPayload.java");
+        assertTrue(Files.exists(modelFile), "CreateFolderPayload model should be generated");
+        String modelContent = Files.readString(modelFile);
+        assertTrue(modelContent.contains("@AssertTrue"), "Model should enforce simple oneOf XOR via Bean Validation");
+        assertTrue(modelContent.contains("requiredMutuallyExclusiveFail"),
+            "Mutual exclusion method name should match platform ConstraintViolation mapping");
+        assertTrue(modelContent.contains("Either department or parent must be set"),
+            "@AssertTrue message should name XOR branches in lexicographic order");
+        assertTrue(modelContent.contains("(this.department != null) ^ (this.parent != null)"),
+            "XOR should compare nullable reference fields");
+        assertFalse(modelContent.contains("@XmlElement(name = \"department\", required = true)"),
+            "oneOf XOR branch fields must not be JAXB-required");
+        assertFalse(modelContent.contains("@XmlElement(name = \"parent\", required = true)"),
+            "oneOf XOR branch fields must not be JAXB-required");
     }
 
     @Test

@@ -71,8 +71,8 @@ final class JerseyExecutorSpecValidation {
     }
 
     /**
-     * Build Java statements (indented with two tabs) for validateRequestSyntaxImpl: required body, read-only,
-     * and simple two-branch {@code oneOf} XOR when detectable.
+     * Build Java statements (indented with two tabs) for validateRequestSyntaxImpl: required body and read-only
+     * attributes. Simple two-branch {@code oneOf} XOR is enforced on the model via {@code @AssertTrue}.
      */
     static String generateRequestBodyValidationCode(
             Map<String, Object> operation,
@@ -103,26 +103,9 @@ final class JerseyExecutorSpecValidation {
         }
 
         StringBuilder bodyChecks = new StringBuilder();
-
-        String[] xor = findSimpleOneOfXorPair(bodySchema, spec, new IdentityHashMap<>(), 0);
-        if (xor != null && xor.length == 2) {
-            String a = xor[0];
-            String b = xor[1];
-            String checkA = modelRef + ".isSet" + accessorSuffixForProperty(a) + "()";
-            String checkB = modelRef + ".isSet" + accessorSuffixForProperty(b) + "()";
-            bodyChecks.append("\t\t\tif (").append(checkA).append(" && ").append(checkB).append(")\n");
-            bodyChecks.append("\t\t\t{\n");
-            bodyChecks.append("\t\t\t\tthrow new egain.ws.framework.WsApiException(\"L10N_MUTUALLY_EXCLUSIVE_ATTRIBUTES_PRESENT\", BAD_REQUEST,\n");
-            bodyChecks.append("\t\t\t\t\t\"").append(JerseyNamingUtils.escapeJavaString(a)).append(", ")
-                    .append(JerseyNamingUtils.escapeJavaString(b)).append("\");\n");
-            bodyChecks.append("\t\t\t}\n\n");
-            bodyChecks.append("\t\t\tif (!").append(checkA).append(" && !").append(checkB).append(")\n");
-            bodyChecks.append("\t\t\t{\n");
-            bodyChecks.append("\t\t\t\tthrow new egain.ws.framework.WsApiException(\"L10N_INVALID_REQUEST_TOO_MANY_ATTRIBUTES\", BAD_REQUEST,\n");
-            bodyChecks.append("\t\t\t\t\t\"").append(JerseyNamingUtils.escapeJavaString(a)).append(", ")
-                    .append(JerseyNamingUtils.escapeJavaString(b)).append("\");\n");
-            bodyChecks.append("\t\t\t}\n\n");
-        }
+        // XOR mutual exclusion for simple two-branch oneOf is enforced on the request model via
+        // @AssertTrue(requiredMutuallyExclusiveFail); avoid duplicating checks here so error handling
+        // stays aligned with Bean Validation / ConstraintViolation mapping.
 
         Set<String> readOnly = new TreeSet<>();
         collectGloballyReadOnlyProperties(bodySchema, spec, readOnly, new IdentityHashMap<>(), 0);
