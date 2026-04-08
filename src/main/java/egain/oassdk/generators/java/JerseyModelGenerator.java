@@ -392,7 +392,7 @@ class JerseyModelGenerator {
         content.append("    public ").append(schemaName).append("() {\n");
         content.append("    }\n\n");
 
-        // Generate getters and setters (readOnly: getter only; writeOnly: setter only; else both)
+        // Generate getters and setters
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
             String fieldName = property.getKey();
             Map<String, Object> fieldSchema = Util.asStringObjectMap(property.getValue());
@@ -401,28 +401,21 @@ class JerseyModelGenerator {
             String javaFieldName = JerseyNamingUtils.toModelFieldName(fieldName);
             String capitalizedFieldName = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaFieldName);
 
-            boolean readOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly");
-            boolean writeOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "writeOnly");
             boolean isListTypeField = fieldType.startsWith("List<");
-            if (readOnly && writeOnly) writeOnly = false;
 
-            // Getter
-            if (!writeOnly) {
-                String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
-                content.append("    public ").append(fieldType).append(" " + methodPrefix).append(capitalizedFieldName).append("() {\n");
-                if (isListTypeField) {
-                    content.append("        if (").append(javaFieldName).append(" == null) {\n");
-                    content.append("            ").append(javaFieldName).append(" = new Array").append(fieldType).append("();\n");
-                    content.append("        }\n");
-                    content.append("        return this.").append(javaFieldName).append(";\n");
-                } else {
-                    content.append("        return ").append(javaFieldName).append(";\n");
-                }
-                content.append("    }\n\n");
+            String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
+            content.append("    public ").append(fieldType).append(" " + methodPrefix).append(capitalizedFieldName).append("() {\n");
+            if (isListTypeField) {
+                content.append("        if (").append(javaFieldName).append(" == null) {\n");
+                content.append("            ").append(javaFieldName).append(" = new Array").append(fieldType).append("();\n");
+                content.append("        }\n");
+                content.append("        return this.").append(javaFieldName).append(";\n");
+            } else {
+                content.append("        return ").append(javaFieldName).append(";\n");
             }
+            content.append("    }\n\n");
 
-            // Setter
-            if (!readOnly && !isListTypeField) {
+            if (!isListTypeField) {
                 content.append("    public void set").append(capitalizedFieldName).append("(").append(fieldType).append(" ").append(javaFieldName).append(") {\n");
                 content.append("        this.").append(javaFieldName).append(" = ").append(javaFieldName).append(";\n");
                 content.append("    }\n\n");
@@ -519,7 +512,6 @@ class JerseyModelGenerator {
             content.append("        switch (name) {\n");
             for (String fieldName : fieldNames) {
                 Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
-                if (JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "writeOnly")) continue;
                 String fieldType = typeUtils.getFieldTypeForModelProperty(schemaName, fieldName, fieldSchema, isArrayType, spec);
                 String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
                 String javaFieldName = JerseyNamingUtils.toModelFieldName(fieldName);
@@ -544,8 +536,6 @@ class JerseyModelGenerator {
         if (!fieldNames.isEmpty()) {
             content.append("        switch (name) {\n");
             for (String fieldName : fieldNames) {
-                Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
-                if (JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly")) continue;
                 String javaFieldName = JerseyNamingUtils.toModelFieldName(fieldName);
                 String capitalizedFieldName = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaFieldName);
                 content.append("            case \"").append(fieldName).append("\":\n");
@@ -567,8 +557,6 @@ class JerseyModelGenerator {
         content.append("        }\n");
         if (!fieldNames.isEmpty()) {
             for (String fieldName : fieldNames) {
-                Map<String, Object> fieldSchema = Util.asStringObjectMap(allProperties.get(fieldName));
-                if (JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "writeOnly")) continue;
                 content.append("        allNames.add(\"").append(fieldName).append("\");\n");
             }
         }
@@ -628,21 +616,16 @@ class JerseyModelGenerator {
                 } else {
                     fieldType = typeUtils.getFieldTypeForModelProperty(schemaName, fieldName, fieldSchema, isArrayType, spec);
                 }
-                boolean readOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly");
                 content.append("            case \"").append(fieldName).append("\":\n");
-                if (readOnly) {
-                    content.append("                return; // readOnly, no setter\n");
+                if (fieldType.startsWith("List<")) {
+                    String itemType = fieldType.substring(5, fieldType.length() - 1);
+                    content.append("                get").append(capitalizedFieldName).append("().add((").append(
+                                    itemType).append(") value);\n");
                 } else {
-                    if (fieldType.startsWith("List<")) {
-                        String itemType = fieldType.substring(5, fieldType.length() - 1);
-                        content.append("                get").append(capitalizedFieldName).append("().add((").append(
-                                        itemType).append(") value);\n");
-                    } else {
-                        content.append("                set").append(capitalizedFieldName).append("((").append(
-                                        fieldType).append(") value);\n");
-                    }
-                    content.append("                return;\n");
+                    content.append("                set").append(capitalizedFieldName).append("((").append(
+                                    fieldType).append(") value);\n");
                 }
+                content.append("                return;\n");
             }
             content.append("            default:\n");
             content.append("                if (_attributes == null) {\n");
@@ -760,25 +743,20 @@ class JerseyModelGenerator {
             String fieldType = typeUtils.getFieldTypeForModelProperty(fullEnclosing, fieldName, fieldSchema, false, spec);
             String javaFieldName = JerseyNamingUtils.toModelFieldName(fieldName);
             String capitalizedFieldName = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaFieldName);
-            boolean readOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "readOnly");
-            boolean writeOnly = JerseySchemaUtils.isSchemaFlagTrue(fieldSchema, "writeOnly");
             boolean isListTypeField = fieldType.startsWith("List<");
-            if (readOnly && writeOnly) writeOnly = false;
-            if (!writeOnly) {
-                String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
-                content.append(indentBody).append("public ").append(fieldType).append(" " + methodPrefix).append(
-                                capitalizedFieldName).append("() {\n");
-                if (isListTypeField) {
-                    content.append(indentBody).append("    if (").append(javaFieldName).append(" == null) {\n");
-                    content.append(indentBody).append("        ").append(javaFieldName).append(" = new Array").append(fieldType).append("();\n");
-                    content.append(indentBody).append("    }\n");
-                    content.append(indentBody).append("    return this.").append(javaFieldName).append(";\n");
-                } else {
-                    content.append(indentBody).append("    return ").append(javaFieldName).append(";\n");
-                }
-                content.append(indentBody).append("}\n\n");
+            String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
+            content.append(indentBody).append("public ").append(fieldType).append(" " + methodPrefix).append(
+                            capitalizedFieldName).append("() {\n");
+            if (isListTypeField) {
+                content.append(indentBody).append("    if (").append(javaFieldName).append(" == null) {\n");
+                content.append(indentBody).append("        ").append(javaFieldName).append(" = new Array").append(fieldType).append("();\n");
+                content.append(indentBody).append("    }\n");
+                content.append(indentBody).append("    return this.").append(javaFieldName).append(";\n");
+            } else {
+                content.append(indentBody).append("    return ").append(javaFieldName).append(";\n");
             }
-            if (!readOnly && !isListTypeField) {
+            content.append(indentBody).append("}\n\n");
+            if (!isListTypeField) {
                 content.append(indentBody).append("public void set").append(capitalizedFieldName).append("(").append(fieldType).append(" ").append(javaFieldName).append(") {\n");
                 content.append(indentBody).append("    this.").append(javaFieldName).append(" = ").append(javaFieldName).append(";\n");
                 content.append(indentBody).append("}\n\n");
@@ -845,7 +823,6 @@ class JerseyModelGenerator {
         content.append(indentBody).append("public Object getAttribute(String name) {\n");
         for (String fn : fieldNames) {
             Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
-            if (JerseySchemaUtils.isSchemaFlagTrue(fs, "writeOnly")) continue;
             String fieldType = typeUtils.getFieldTypeForModelProperty(fullEnclosing, fn, fs, false, spec);
             String methodPrefix = fieldType.equals("boolean") || fieldType.equals("Boolean") ? "is" : "get";
             String cap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName(fn));
@@ -857,8 +834,6 @@ class JerseyModelGenerator {
         content.append(indentBody).append("@Override\n");
         content.append(indentBody).append("public boolean isSetAttribute(String name) {\n");
         for (String fn : fieldNames) {
-            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
-            if (JerseySchemaUtils.isSchemaFlagTrue(fs, "readOnly")) continue;
             String cap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName(fn));
             content.append(indentBody).append("    if (\"").append(fn).append("\".equals(name)) return isSet").append(cap).append("();\n");
         }
@@ -869,8 +844,6 @@ class JerseyModelGenerator {
         content.append(indentBody).append("public List<String> getAttributeNames() {\n");
         content.append(indentBody).append("    List<String> names = new ArrayList<>();\n");
         for (String fn : fieldNames) {
-            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
-            if (JerseySchemaUtils.isSchemaFlagTrue(fs, "writeOnly")) continue;
             content.append(indentBody).append("    names.add(\"").append(fn).append("\");\n");
         }
         content.append(indentBody).append("    return names;\n");
@@ -879,8 +852,6 @@ class JerseyModelGenerator {
         content.append(indentBody).append("@Override\n");
         content.append(indentBody).append("public void setAttribute(String name, Object value) {\n");
         for (String fn : fieldNames) {
-            Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
-            if (JerseySchemaUtils.isSchemaFlagTrue(fs, "readOnly")) continue;
             String jf = JerseyNamingUtils.toModelFieldName(fn);
             String cap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(jf);
             String ft = typeUtils.getFieldTypeForModelProperty(fullEnclosing, fn, Util.asStringObjectMap(allProperties.get(fn)), false, spec);
