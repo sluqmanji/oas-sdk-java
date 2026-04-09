@@ -320,6 +320,41 @@ public class UnitTestGeneratorTest {
                 });
         }
     }
+
+    @Test
+    public void testInvalidQueryValuesGeneratedForAllConstrainedQueryParams(@TempDir Path tempDir)
+            throws GenerationException, java.io.IOException {
+        Map<String, Object> mixed = createSpecWithMixedQueryInvalidParameters();
+        testConfig.setTestFramework("junit5");
+
+        generator.generate(mixed, tempDir.toString(), testConfig, "junit5");
+
+        Path testFile = tempDir.resolve("unit/com/example/api/CatalogApiTest.java");
+        assertTrue(Files.exists(testFile), "Expected CatalogApiTest.java for tag Catalog");
+        String content = Files.readString(testFile);
+        assertTrue(content.contains("void testSearchItems_InvalidQFormat(String invalidValue)"), content);
+        assertTrue(content.contains("void testSearchItems_InvalidPageFormat(String invalidValue)"), content);
+        assertTrue(content.contains("void testSearchItems_InvalidSortFormat(String invalidValue)"), content);
+        assertTrue(content.contains("void testSearchItems_InvalidActiveFormat(String invalidValue)"), content);
+        assertTrue(content.contains("void testSearchItems_InvalidLabelFormat(String invalidValue)"), content);
+        assertTrue(content.contains("assertFalse(invalidValue.matches("),
+            "Pattern-only query param should keep local regex assertion");
+    }
+
+    @Test
+    public void testInvalidPathParameterUsesInvalidValueInMap(@TempDir Path tempDir)
+            throws GenerationException, java.io.IOException {
+        Map<String, Object> s = createSpecWithPathPatternParameter();
+        testConfig.setTestFramework("junit5");
+
+        generator.generate(s, tempDir.toString(), testConfig, "junit5");
+
+        Path testFile = tempDir.resolve("unit/com/example/api/WidgetApiTest.java");
+        assertTrue(Files.exists(testFile));
+        String content = Files.readString(testFile);
+        assertTrue(content.contains("pathParams.put(\"widgetId\", invalidValue)"),
+            "Invalid path param test should pass invalidValue into pathParams");
+    }
     
     @Test
     public void testEnhancedMissingRequiredParameterTests(@TempDir Path tempDir) throws GenerationException, java.io.IOException {
@@ -496,11 +531,60 @@ public class UnitTestGeneratorTest {
     /**
      * Helper method to create spec with pattern parameter
      */
+    private Map<String, Object> createSpecWithMixedQueryInvalidParameters() {
+        Map<String, Object> spec = new HashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("info", Map.of("title", "Test API", "version", "1.0.0"));
+
+        Map<String, Object> get = new HashMap<>();
+        get.put("operationId", "searchItems");
+        get.put("summary", "Search items");
+        get.put("tags", java.util.List.of("Catalog"));
+        get.put("parameters", java.util.List.of(
+                Map.of("name", "q", "in", "query", "schema",
+                        Map.of("type", "string", "pattern", "^[a-z]+$")),
+                Map.of("name", "page", "in", "query", "schema",
+                        Map.of("type", "integer", "minimum", 1)),
+                Map.of("name", "sort", "in", "query", "schema",
+                        Map.of("type", "string", "enum", java.util.List.of("asc", "desc"))),
+                Map.of("name", "active", "in", "query", "schema", Map.of("type", "boolean")),
+                Map.of("name", "label", "in", "query", "schema",
+                        Map.of("type", "string", "minLength", 1))
+        ));
+        get.put("responses", Map.of("200", Map.of("description", "OK")));
+
+        Map<String, Object> pathItem = new HashMap<>();
+        pathItem.put("get", get);
+        spec.put("paths", Map.of("/items", pathItem));
+        return spec;
+    }
+
+    private Map<String, Object> createSpecWithPathPatternParameter() {
+        Map<String, Object> spec = new HashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("info", Map.of("title", "Test API", "version", "1.0.0"));
+
+        Map<String, Object> get = new HashMap<>();
+        get.put("operationId", "getWidget");
+        get.put("summary", "Get widget");
+        get.put("tags", java.util.List.of("Widget"));
+        get.put("parameters", java.util.List.of(
+                Map.of("name", "widgetId", "in", "path", "required", true,
+                        "schema", Map.of("type", "string", "pattern", "^[A-Z]{3}$"))
+        ));
+        get.put("responses", Map.of("200", Map.of("description", "OK")));
+
+        Map<String, Object> pathItem = new HashMap<>();
+        pathItem.put("get", get);
+        spec.put("paths", Map.of("/widgets/{widgetId}", pathItem));
+        return spec;
+    }
+
     private Map<String, Object> createSpecWithPatternParameter() {
         Map<String, Object> spec = new HashMap<>();
         spec.put("openapi", "3.0.0");
         spec.put("info", Map.of("title", "Test API", "version", "1.0.0"));
-        
+
         Map<String, Object> paths = new HashMap<>();
         Map<String, Object> pathItem = new HashMap<>();
         Map<String, Object> get = new HashMap<>();
