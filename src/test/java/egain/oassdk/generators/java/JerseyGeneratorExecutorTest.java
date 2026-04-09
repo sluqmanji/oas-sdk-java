@@ -675,6 +675,18 @@ public class JerseyGeneratorExecutorTest {
             "@AssertTrue message should name XOR branches in lexicographic order");
         assertTrue(modelContent.contains("(this.department != null) ^ (this.parent != null)"),
             "XOR should compare nullable reference fields");
+        assertTrue(modelContent.contains("requiredDepartmentIdMissing"),
+            "Model should enforce nested department.id when oneOf branch requires it");
+        assertTrue(modelContent.contains("requiredParentIdMissing"),
+            "Model should enforce nested parent.id when oneOf branch requires it");
+        assertTrue(modelContent.contains("department.id must be set"),
+            "@AssertTrue message for department nested id");
+        assertTrue(modelContent.contains("parent.id must be set"),
+            "@AssertTrue message for parent nested id");
+        assertTrue(modelContent.contains("return this.department == null || this.department.isSetId();"),
+            "department branch should allow null top-level field or require nested id via isSetId");
+        assertTrue(modelContent.contains("return this.parent == null || this.parent.isSetId();"),
+            "parent branch should allow null top-level field or require nested id via isSetId");
         assertFalse(modelContent.contains("@XmlElement(name = \"department\", required = true)"),
             "oneOf XOR branch fields must not be JAXB-required");
         assertFalse(modelContent.contains("@XmlElement(name = \"parent\", required = true)"),
