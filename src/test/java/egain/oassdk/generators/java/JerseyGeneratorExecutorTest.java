@@ -683,8 +683,8 @@ public class JerseyGeneratorExecutorTest {
             "@AssertTrue message for department nested id");
         assertTrue(modelContent.contains("parent.id must be set"),
             "@AssertTrue message for parent nested id");
-        assertTrue(modelContent.contains("return this.department == null || this.department.isSetId();"),
-            "department branch should allow null top-level field or require nested id via isSetId");
+        assertTrue(modelContent.contains("return this.department == null || this.department.getId() != 0;"),
+            "department branch should allow null top-level field or require nested primitive id via getId() != 0");
         assertTrue(modelContent.contains("return this.parent == null || this.parent.isSetId();"),
             "parent branch should allow null top-level field or require nested id via isSetId");
         assertFalse(modelContent.contains("@XmlElement(name = \"department\", required = true)"),

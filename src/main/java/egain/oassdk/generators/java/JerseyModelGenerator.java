@@ -342,6 +342,38 @@ class JerseyModelGenerator {
             content.append("    private Map<String, Object> _attributes;\n\n");
         }
 
+        // Simple two-branch oneOf: emit XOR + nested id @AssertTrue methods right after the last XOR field
+        StringBuilder oneOfXorAssertBlock = null;
+        String injectXorAssertsAfterField = null;
+        if (oneOfXorPair != null && oneOfXorPair.length == 2 && oneOfXorInfo != null) {
+            String xorJson0 = oneOfXorPair[0];
+            String xorJson1 = oneOfXorPair[1];
+            Map<String, Object> xorSchema0 = Util.asStringObjectMap(allProperties.get(xorJson0));
+            Map<String, Object> xorSchema1 = Util.asStringObjectMap(allProperties.get(xorJson1));
+            String xorType0 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson0, xorSchema0, isArrayType, spec);
+            String xorType1 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson1, xorSchema1, isArrayType, spec);
+            if (!JerseyTypeUtils.isJavaPrimitiveType(xorType0) && !JerseyTypeUtils.isJavaPrimitiveType(xorType1)) {
+                oneOfXorAssertBlock = new StringBuilder();
+                String xorJava0 = JerseyNamingUtils.toModelFieldName(xorJson0);
+                String xorJava1 = JerseyNamingUtils.toModelFieldName(xorJson1);
+                String xorMessage = "Either " + xorJson0 + " or " + xorJson1 + " must be set";
+                oneOfXorAssertBlock.append("    @XmlTransient\n");
+                oneOfXorAssertBlock.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(xorMessage)).append("\")\n");
+                oneOfXorAssertBlock.append("    public boolean requiredMutuallyExclusiveFail() {\n");
+                oneOfXorAssertBlock.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
+                oneOfXorAssertBlock.append("    }\n\n");
+                appendOneOfXorNestedIdAssertTrue(oneOfXorAssertBlock, oneOfXorInfo.sortedJson0(), oneOfXorInfo.nestedIdRequiredForSorted0(),
+                        schemaName, allProperties, isArrayType, spec);
+                appendOneOfXorNestedIdAssertTrue(oneOfXorAssertBlock, oneOfXorInfo.sortedJson1(), oneOfXorInfo.nestedIdRequiredForSorted1(),
+                        schemaName, allProperties, isArrayType, spec);
+                for (String fn : fieldNames) {
+                    if (xorExclusiveJsonNames.contains(fn)) {
+                        injectXorAssertsAfterField = fn;
+                    }
+                }
+            }
+        }
+
         // Generate fields
         for (Map.Entry<String, Object> property : allProperties.entrySet()) {
             String fieldName = property.getKey();
@@ -405,6 +437,10 @@ class JerseyModelGenerator {
 
             // Add field type and name
             content.append("private ").append(fieldType).append(" ").append(javaFieldName).append(";\n\n");
+
+            if (oneOfXorAssertBlock != null && fieldName.equals(injectXorAssertsAfterField)) {
+                content.append(oneOfXorAssertBlock);
+            }
         }
 
         // Generate default constructor
@@ -456,30 +492,6 @@ class JerseyModelGenerator {
                     content.append("        return (this.").append(javaFieldName).append(" != null);\n");
                 }
                 content.append("    }\n\n");
-            }
-        }
-
-        if (oneOfXorPair != null && oneOfXorPair.length == 2 && oneOfXorInfo != null) {
-            String xorJson0 = oneOfXorPair[0];
-            String xorJson1 = oneOfXorPair[1];
-            Map<String, Object> xorSchema0 = Util.asStringObjectMap(allProperties.get(xorJson0));
-            Map<String, Object> xorSchema1 = Util.asStringObjectMap(allProperties.get(xorJson1));
-            String xorType0 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson0, xorSchema0, isArrayType, spec);
-            String xorType1 = typeUtils.getFieldTypeForModelProperty(schemaName, xorJson1, xorSchema1, isArrayType, spec);
-            if (!JerseyTypeUtils.isJavaPrimitiveType(xorType0) && !JerseyTypeUtils.isJavaPrimitiveType(xorType1)) {
-                String xorJava0 = JerseyNamingUtils.toModelFieldName(xorJson0);
-                String xorJava1 = JerseyNamingUtils.toModelFieldName(xorJson1);
-                String xorMessage = "Either " + xorJson0 + " or " + xorJson1 + " must be set";
-                content.append("    @XmlTransient\n");
-                content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(xorMessage)).append("\")\n");
-                content.append("    public boolean requiredMutuallyExclusiveFail() {\n");
-                content.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
-                content.append("    }\n\n");
-
-                appendOneOfXorNestedIdAssertTrue(content, oneOfXorInfo.sortedJson0(), oneOfXorInfo.nestedIdRequiredForSorted0(),
-                        schemaName, allProperties, isArrayType, spec);
-                appendOneOfXorNestedIdAssertTrue(content, oneOfXorInfo.sortedJson1(), oneOfXorInfo.nestedIdRequiredForSorted1(),
-                        schemaName, allProperties, isArrayType, spec);
             }
         }
 
@@ -703,7 +715,8 @@ class JerseyModelGenerator {
 
     /**
      * Emit {@code @AssertTrue} for nested {@code id} when a simple XOR {@code oneOf} branch marks that object with
-     * {@code required: [id]}. Skips when the nested {@code id} maps to a Java primitive (no reliable {@code isSetId()}).
+     * {@code required: [id]}. Reference or boxed {@code id} uses {@code isSetId()}; primitive numeric {@code id} uses
+     * {@code getId() != 0} (zero treated as unset). Skips when {@code id} is primitive {@code boolean}.
      */
     private void appendOneOfXorNestedIdAssertTrue(
             StringBuilder content,
@@ -729,17 +742,42 @@ class JerseyModelGenerator {
         }
         String xorFieldType = typeUtils.getFieldTypeForModelProperty(schemaName, xorJsonName, xorSchema, isArrayType, spec);
         String idJavaType = typeUtils.getFieldTypeForModelProperty(xorFieldType, "id", idSchema, false, spec);
-        if (JerseyTypeUtils.isJavaPrimitiveType(idJavaType)) {
+        String javaField = JerseyNamingUtils.toModelFieldName(xorJsonName);
+        String returnClause = nestedIdAssertTrueReturnClause(javaField, idJavaType);
+        if (returnClause == null) {
             return;
         }
-        String javaField = JerseyNamingUtils.toModelFieldName(xorJsonName);
         String methodCap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaField);
         String msg = xorJsonName + ".id must be set";
         content.append("    @XmlTransient\n");
         content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(msg)).append("\")\n");
         content.append("    public boolean required").append(methodCap).append("IdMissing() {\n");
-        content.append("        return this.").append(javaField).append(" == null || this.").append(javaField).append(".isSetId();\n");
+        content.append("        return ").append(returnClause).append(";\n");
         content.append("    }\n\n");
+    }
+
+    /**
+     * @return {@code null} when no {@code @AssertTrue} should be emitted (e.g. primitive {@code boolean} id).
+     */
+    private static String nestedIdAssertTrueReturnClause(String javaField, String idJavaType) {
+        if (JerseyTypeUtils.isJavaPrimitiveType(idJavaType)) {
+            if ("boolean".equals(idJavaType)) {
+                return null;
+            }
+            String idGetter = "get" + JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName("id"));
+            String nonNullBranch = "this." + javaField + "." + idGetter + "()";
+            String comparison = switch (idJavaType) {
+                case "float" -> nonNullBranch + " != 0.0f";
+                case "double" -> nonNullBranch + " != 0.0";
+                case "int", "long", "short", "byte", "char" -> nonNullBranch + " != 0";
+                default -> null;
+            };
+            if (comparison == null) {
+                return null;
+            }
+            return "this." + javaField + " == null || " + comparison;
+        }
+        return "this." + javaField + " == null || this." + javaField + ".isSetId()";
     }
 
     // ---------------------------------------------------------------------------
