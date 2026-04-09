@@ -226,10 +226,12 @@ class JerseyModelGenerator {
         // required/readOnly; strip those for the pair and enforce XOR via @AssertTrue on the bean.
         Set<String> xorExclusiveJsonNames = Collections.emptySet();
         String[] oneOfXorPair = null;
+        JerseyExecutorSpecValidation.SimpleOneOfXorInfo oneOfXorInfo = null;
         if (!isArrayType) {
-            oneOfXorPair = JerseyExecutorSpecValidation.findSimpleOneOfXorPair(
+            oneOfXorInfo = JerseyExecutorSpecValidation.findSimpleOneOfXorInfo(
                     schema, spec, new IdentityHashMap<>(), 0);
-            if (oneOfXorPair != null && oneOfXorPair.length == 2) {
+            if (oneOfXorInfo != null) {
+                oneOfXorPair = new String[] { oneOfXorInfo.sortedJson0(), oneOfXorInfo.sortedJson1() };
                 xorExclusiveJsonNames = Set.of(oneOfXorPair[0], oneOfXorPair[1]);
                 allRequired.removeIf(xorExclusiveJsonNames::contains);
             }
@@ -457,7 +459,7 @@ class JerseyModelGenerator {
             }
         }
 
-        if (oneOfXorPair != null && oneOfXorPair.length == 2) {
+        if (oneOfXorPair != null && oneOfXorPair.length == 2 && oneOfXorInfo != null) {
             String xorJson0 = oneOfXorPair[0];
             String xorJson1 = oneOfXorPair[1];
             Map<String, Object> xorSchema0 = Util.asStringObjectMap(allProperties.get(xorJson0));
@@ -473,6 +475,11 @@ class JerseyModelGenerator {
                 content.append("    public boolean requiredMutuallyExclusiveFail() {\n");
                 content.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
                 content.append("    }\n\n");
+
+                appendOneOfXorNestedIdAssertTrue(content, oneOfXorInfo.sortedJson0(), oneOfXorInfo.nestedIdRequiredForSorted0(),
+                        schemaName, allProperties, isArrayType, spec);
+                appendOneOfXorNestedIdAssertTrue(content, oneOfXorInfo.sortedJson1(), oneOfXorInfo.nestedIdRequiredForSorted1(),
+                        schemaName, allProperties, isArrayType, spec);
             }
         }
 
@@ -692,6 +699,47 @@ class JerseyModelGenerator {
         content.append("}\n");
 
         JerseyGenerationContext.writeFile(outputDir + (ctx.modelsOnly?"/":"/src/main/java/") + packagePath.replace(".", "/") + (ctx.modelsOnly?"/"+JerseyNamingUtils.sanitizePackageName(schemaName)+"/":"/model/") + schemaName + ".java", content.toString());
+    }
+
+    /**
+     * Emit {@code @AssertTrue} for nested {@code id} when a simple XOR {@code oneOf} branch marks that object with
+     * {@code required: [id]}. Skips when the nested {@code id} maps to a Java primitive (no reliable {@code isSetId()}).
+     */
+    private void appendOneOfXorNestedIdAssertTrue(
+            StringBuilder content,
+            String xorJsonName,
+            boolean nestedIdRequired,
+            String schemaName,
+            Map<String, Object> allProperties,
+            boolean isArrayType,
+            Map<String, Object> spec) {
+        if (!nestedIdRequired) {
+            return;
+        }
+        Map<String, Object> xorSchema = Util.asStringObjectMap(allProperties.get(xorJsonName));
+        if (xorSchema == null) {
+            return;
+        }
+        Map<String, Object> resolvedXor = JerseySchemaUtils.resolveRefInSchema(xorSchema, spec);
+        Map<String, Object> effectiveXor = JerseySchemaUtils.resolveCompositionToEffectiveSchema(resolvedXor, spec);
+        Map<String, Object> innerProps = Util.asStringObjectMap(effectiveXor != null ? effectiveXor.get("properties") : null);
+        Map<String, Object> idSchema = Util.asStringObjectMap(innerProps != null ? innerProps.get("id") : null);
+        if (idSchema == null) {
+            return;
+        }
+        String xorFieldType = typeUtils.getFieldTypeForModelProperty(schemaName, xorJsonName, xorSchema, isArrayType, spec);
+        String idJavaType = typeUtils.getFieldTypeForModelProperty(xorFieldType, "id", idSchema, false, spec);
+        if (JerseyTypeUtils.isJavaPrimitiveType(idJavaType)) {
+            return;
+        }
+        String javaField = JerseyNamingUtils.toModelFieldName(xorJsonName);
+        String methodCap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaField);
+        String msg = xorJsonName + ".id must be set";
+        content.append("    @XmlTransient\n");
+        content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(msg)).append("\")\n");
+        content.append("    public boolean required").append(methodCap).append("IdMissing() {\n");
+        content.append("        return this.").append(javaField).append(" == null || this.").append(javaField).append(".isSetId();\n");
+        content.append("    }\n\n");
     }
 
     // ---------------------------------------------------------------------------
