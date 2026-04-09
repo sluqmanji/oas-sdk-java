@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -229,22 +230,18 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                     ? Util.asStringObjectMap(param.get("schema"))
                     : new HashMap<>();
 
-            if (schema.containsKey("type")) {
-                String type = (String) schema.get("type");
-                if ("string".equals(type) && schema.containsKey("pattern")) {
-                    String pattern = (String) schema.get("pattern");
-                    sb.append("    @ParameterizedTest\n");
-                    sb.append("    @ValueSource(strings = {\"invalid\", \"test123\", \"\"})\n");
-                    sb.append("    @DisplayName(\"").append(escapeJavaString(summary != null ? summary : method + " " + path))
-                            .append(" - Invalid ").append(escapeJavaString(paramName)).append(" Format\")\n");
-                    sb.append("    public void test").append(capitalize(testMethodName)).append("_Invalid")
-                            .append(capitalize(toMethodName(paramName))).append("Format(String invalidValue) {\n");
-                    appendParamMapsWithInvalidQuery(sb, parameters, paramName, "invalidValue");
-                    appendRestAssuredWhenThen(sb, method, path, bodyLiteral,
-                            "        .then()\n            .statusCode(anyOf(equalTo(400), equalTo(422)));\n");
-                    sb.append("        assertFalse(invalidValue.matches(\"").append(escapeJavaString(pattern))
-                            .append("\"), \"Sample value should not match schema pattern\");\n");
-                    sb.append("    }\n\n");
+            if ("query".equals(paramIn)) {
+                List<String> invalidLiterals = buildInvalidQueryValueLiterals(schema);
+                if (invalidLiterals != null && !invalidLiterals.isEmpty()) {
+                    emitInvalidParameterTest(sb, testMethodName, summary, method, path, parameters, paramName, bodyLiteral,
+                            invalidLiterals, shouldEmitPatternAssertion(schema), (String) schema.get("pattern"));
+                }
+            } else if ("path".equals(paramIn) && "string".equals(schema.get("type")) && schema.containsKey("pattern")) {
+                String pattern = (String) schema.get("pattern");
+                if (pattern != null && !pattern.isBlank()) {
+                    List<String> pathPatternLiterals = List.of("invalid", "test123", "");
+                    emitInvalidParameterTest(sb, testMethodName, summary, method, path, parameters, paramName, bodyLiteral,
+                            pathPatternLiterals, shouldEmitPatternAssertion(schema), pattern);
                 }
             }
         }
@@ -576,16 +573,20 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
         }
     }
 
-    private void appendParamMapsWithInvalidQuery(StringBuilder sb, List<Map<String, Object>> parameters,
-                                                 String invalidParamName, String invalidVar) {
+    private void appendParamMapsWithInvalidParameter(StringBuilder sb, List<Map<String, Object>> parameters,
+                                                     String invalidParamName, String invalidVar) {
         sb.append("        Map<String, String> pathParams = new HashMap<>();\n");
         for (Map<String, Object> param : parameters) {
             if (!"path".equals(param.get("in"))) {
                 continue;
             }
             String name = (String) param.get("name");
-            sb.append("        pathParams.put(\"").append(escapeJavaString(name)).append("\", \"")
-                    .append(escapeJavaString(getParameterExample(param))).append("\");\n");
+            if (name.equals(invalidParamName)) {
+                sb.append("        pathParams.put(\"").append(escapeJavaString(name)).append("\", ").append(invalidVar).append(");\n");
+            } else {
+                sb.append("        pathParams.put(\"").append(escapeJavaString(name)).append("\", \"")
+                        .append(escapeJavaString(getParameterExample(param))).append("\");\n");
+            }
         }
         sb.append("        Map<String, String> queryParams = new HashMap<>();\n");
         for (Map<String, Object> param : parameters) {
@@ -600,6 +601,155 @@ public class UnitTestGenerator implements TestGenerator, ConfigurableTestGenerat
                         .append(escapeJavaString(getParameterExample(param))).append("\");\n");
             }
         }
+    }
+
+    /**
+     * When {@code enum} is present, a bad value may still match a {@code pattern}; skip local regex assertion in that case.
+     */
+    private static boolean shouldEmitPatternAssertion(Map<String, Object> schema) {
+        if (schema == null || !"string".equals(schema.get("type"))) {
+            return false;
+        }
+        if (schema.containsKey("enum")) {
+            return false;
+        }
+        String pattern = (String) schema.get("pattern");
+        return pattern != null && !pattern.isBlank();
+    }
+
+    /**
+     * Builds raw invalid sample strings for a query parameter schema, or {@code null} if the spec does not imply validation.
+     */
+    private List<String> buildInvalidQueryValueLiterals(Map<String, Object> schema) {
+        if (schema == null || schema.isEmpty()) {
+            return null;
+        }
+        String type = (String) schema.get("type");
+        if (type == null) {
+            return null;
+        }
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        switch (type) {
+            case "string" -> {
+                List<String> enumVals = Util.asStringList(schema.get("enum"));
+                if (enumVals != null && !enumVals.isEmpty()) {
+                    String sentinel = "__INVALID_ENUM_VALUE_SDK__";
+                    if (!enumVals.contains(sentinel)) {
+                        values.add(sentinel);
+                    } else {
+                        values.add("__INVALID_ENUM_VALUE_SDK___");
+                    }
+                }
+                String pattern = (String) schema.get("pattern");
+                if (pattern != null && !pattern.isBlank()) {
+                    values.add("invalid");
+                    values.add("test123");
+                    values.add("");
+                }
+                if (schema.containsKey("minLength")) {
+                    int minLen = ((Number) schema.get("minLength")).intValue();
+                    if (minLen > 0) {
+                        values.add("");
+                    }
+                }
+                if (schema.containsKey("maxLength")) {
+                    int maxLen = ((Number) schema.get("maxLength")).intValue();
+                    if (maxLen >= 0) {
+                        int n = Math.min(maxLen + 1, MAX_BOUNDARY_STRING_LITERAL_LENGTH);
+                        if (n > 0) {
+                            values.add("a".repeat(n));
+                        }
+                    }
+                }
+                if (values.isEmpty()) {
+                    return null;
+                }
+            }
+            case "integer", "number" -> {
+                values.add("not-a-number");
+                values.add("12.34");
+                addNumericBoundInvalidLiterals(schema, type, values);
+            }
+            case "boolean" -> {
+                values.add("maybe");
+                values.add("2");
+                values.add("not-bool");
+            }
+            default -> {
+                return null;
+            }
+        }
+        return new ArrayList<>(values);
+    }
+
+    private static void addNumericBoundInvalidLiterals(Map<String, Object> schema, String type, LinkedHashSet<String> values) {
+        if (schema.containsKey("minimum")) {
+            Number min = (Number) schema.get("minimum");
+            boolean exclusive = Boolean.TRUE.equals(schema.get("exclusiveMinimum"));
+            if ("integer".equals(type)) {
+                long m = min.longValue();
+                if (exclusive) {
+                    values.add(Long.toString(m));
+                } else if (m > Long.MIN_VALUE) {
+                    values.add(Long.toString(m - 1));
+                }
+            } else {
+                double m = min.doubleValue();
+                if (exclusive) {
+                    values.add(Double.toString(m));
+                } else {
+                    values.add(Double.toString(m - 1.0));
+                }
+            }
+        }
+        if (schema.containsKey("maximum")) {
+            Number max = (Number) schema.get("maximum");
+            boolean exclusive = Boolean.TRUE.equals(schema.get("exclusiveMaximum"));
+            if ("integer".equals(type)) {
+                long m = max.longValue();
+                if (exclusive) {
+                    values.add(Long.toString(m));
+                } else if (m < Long.MAX_VALUE) {
+                    values.add(Long.toString(m + 1));
+                }
+            } else {
+                double m = max.doubleValue();
+                if (exclusive) {
+                    values.add(Double.toString(m));
+                } else {
+                    values.add(Double.toString(m + 1.0));
+                }
+            }
+        }
+    }
+
+    private void emitInvalidParameterTest(StringBuilder sb, String testMethodName, String summary, String method, String path,
+                                          List<Map<String, Object>> parameters, String paramName, String bodyLiteral,
+                                          List<String> valueLiterals, boolean emitPatternAssertion, String pattern) {
+        if (valueLiterals == null || valueLiterals.isEmpty()) {
+            return;
+        }
+        sb.append("    @ParameterizedTest\n");
+        sb.append("    @ValueSource(strings = {");
+        for (int i = 0; i < valueLiterals.size(); i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append("\"").append(escapeJavaString(valueLiterals.get(i))).append("\"");
+        }
+        sb.append("})\n");
+        sb.append("    @DisplayName(\"").append(escapeJavaString(summary != null ? summary : method + " " + path))
+                .append(" - Invalid ").append(escapeJavaString(paramName)).append(" Format\")\n");
+        sb.append("    public void test").append(capitalize(testMethodName)).append("_Invalid")
+                .append(capitalize(toMethodName(paramName))).append("Format(String invalidValue) {\n");
+        appendParamMapsWithInvalidParameter(sb, parameters, paramName, "invalidValue");
+        appendRestAssuredWhenThen(sb, method, path, bodyLiteral,
+                "        .then()\n            .statusCode(anyOf(equalTo(400), equalTo(422)));\n");
+        if (emitPatternAssertion && pattern != null && !pattern.isBlank()) {
+            sb.append("        assertFalse(invalidValue.matches(\"").append(escapeJavaString(pattern))
+                    .append("\"), \"Sample value should not match schema pattern\");\n");
+        }
+        sb.append("    }\n\n");
     }
 
     private String minimalJsonBodyLiteral(Map<String, Object> operation) {
