@@ -1,0 +1,42 @@
+openapi: 3.0.0
+info:
+  title: OneOfXorNestedIdTest
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    createFolder:
+      type: object
+      required:
+        - name
+      oneOf:
+        - title: Create a root-level folder
+          required:
+            - department
+          properties:
+            department:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+            parent:
+              readOnly: true
+        - title: Create a folder under parent
+          required:
+            - parent
+          properties:
+            department:
+              readOnly: true
+            parent:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+                  writeOnly: true
+      properties:
+        name:
+          type: string
