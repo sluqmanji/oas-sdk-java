@@ -44,7 +44,7 @@ mvn package
 - **`core`** — OpenAPI parsing (`OASParser`), validation (`OASValidator`), metadata extraction (`OASMetadata`). Parser handles external `$ref` resolution and ZIP-based spec loading.
 - **`generators`** — Code generation via Factory + Strategy pattern:
   - `GeneratorFactory` creates language/framework-specific generators (`CodeGenerator` interface)
-  - `generators.java` — Java/Jersey generator decomposed into 13 focused classes: `JerseyGenerator` (orchestrator), `JerseyModelGenerator` (POJOs from schemas), `JerseyResourceGenerator` (JAX-RS resources), `JerseyBuildGenerator` (pom.xml), `JerseyObservabilityGenerator`, `JerseyAuthorizationDataGenerator`, etc.
+  - `generators.java` — Java/Jersey generator decomposed into focused classes: `JerseyGenerator` (orchestrator), `JerseyModelGenerator` (POJOs from schemas), `JerseyResourceGenerator` (JAX-RS resources), `JerseySchemaOneOfXor` (simple oneOf XOR for models), `JerseyBuildGenerator` (pom.xml), `JerseyObservabilityGenerator`, `JerseyAuthorizationDataGenerator`, etc.
   - `generators.python` — FastAPI and Flask generators
   - `generators.nodejs` — Express generator
   - `generators.go`, `generators.csharp` — Stubs

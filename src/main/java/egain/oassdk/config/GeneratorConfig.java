@@ -29,7 +29,7 @@ public class GeneratorConfig {
     // ZIP-based spec loading: when set, specs and $ref resolution are read from this ZIP (entry paths use forward slashes)
     private String specZipPath;
 
-    private boolean modelsOnly; // If true, only generate models and skip executor/resources.
+    private boolean modelsOnly; // If true, only generate models and skip resources, services, and other non-model output.
 
     /** When true, emit Java *AuthorizationData classes from {@code x-egain-authorization-data} on component schemas. */
     private boolean authorizationDataGenerationEnabled;

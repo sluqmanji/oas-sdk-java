@@ -47,27 +47,12 @@ public class GenerateBundleSDK {
             java.nio.file.Path outputPath = java.nio.file.Paths.get(outputDir);
             if (java.nio.file.Files.exists(outputPath)) {
                 System.out.println("   ✓ Output directory exists: " + outputPath.toAbsolutePath());
-                
-                // Check for executor directory
-                java.nio.file.Path executorDir = outputPath.resolve("src/main/java/" + packageName.replace(".", "/") + "/executor");
-                if (java.nio.file.Files.exists(executorDir)) {
-                    System.out.println("   ✓ Executor directory exists");
-                    try {
-                        long executorCount = java.nio.file.Files.list(executorDir)
-                            .filter(p -> p.toString().endsWith("BOExecutor.java"))
-                            .count();
-                        System.out.println("   ✓ Generated " + executorCount + " executor file(s)");
-                    } catch (Exception e) {
-                        System.out.println("   ⚠ Could not count executor files: " + e.getMessage());
-                    }
-                }
             }
             
             System.out.println("\n=== SDK Generation Complete ===");
             System.out.println("Generated SDK location: " + outputPath.toAbsolutePath());
             System.out.println("Generated Tests location: " + java.nio.file.Paths.get(testOutputDir).toAbsolutePath());
-            System.out.println("\nNote: Executor files have been generated in the executor package.");
-            System.out.println("      You can now implement the business logic in the TODO sections.");
+            System.out.println("\nNote: You can now implement the business logic in the TODO sections.");
             System.out.println("      Tests (unit, integration, NFR, Postman) have been generated.");
             
         } catch (OASSDKException e) {

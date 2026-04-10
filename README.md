@@ -176,7 +176,7 @@ oas-sdk-java/
 │   │   │       │   │   ├── JerseyGenerationContext.java    # Shared state
 │   │   │       │   │   ├── JerseyModelGenerator.java       # Model classes, JAXB
 │   │   │       │   │   ├── JerseyResourceGenerator.java    # REST endpoints
-│   │   │       │   │   ├── JerseyExecutorGenerator.java    # BO executors
+│   │   │       │   │   ├── JerseySchemaOneOfXor.java       # simple oneOf XOR for models
 │   │   │       │   │   ├── JerseyBuildGenerator.java       # pom.xml, Application
 │   │   │       │   │   ├── JerseyValidationGenerator.java  # 17 validator classes
 │   │   │       │   │   ├── JerseyQueryParamValidatorGenerator.java
@@ -2124,7 +2124,7 @@ For support and questions:
   - [x] Prometheus scrape endpoint at `/metrics` for all languages
 - [x] JerseyGenerator decomposition (7,318 LOC -> 13 focused classes)
   - [x] JerseyGenerator coordinator (~380 LOC)
-  - [x] JerseyModelGenerator, JerseyResourceGenerator, JerseyExecutorGenerator
+  - [x] JerseyModelGenerator, JerseyResourceGenerator, JerseySchemaOneOfXor
   - [x] JerseyValidationGenerator, JerseyQueryParamValidatorGenerator
   - [x] JerseyBuildGenerator, JerseyObservabilityGenerator
   - [x] JerseySchemaCollector, JerseySchemaUtils, JerseyTypeUtils, JerseyNamingUtils
