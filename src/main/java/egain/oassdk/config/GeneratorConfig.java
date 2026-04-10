@@ -47,6 +47,13 @@ public class GeneratorConfig {
      */
     private boolean jsonOnlyResourceMediaTypes;
 
+    /**
+     * When true, simple two-branch {@code oneOf} XOR models emit legacy-style nested {@code id} {@code @AssertTrue}
+     * methods and messages (e.g. eGain bindings parity). When false (default), predicates follow OpenAPI {@code id}
+     * type and standard Bean Validation semantics.
+     */
+    private boolean legacyXorNestedIdAsserts;
+
     // Observability configuration (OpenTelemetry + Micrometer)
     private ObservabilityConfig observabilityConfig;
 
@@ -70,6 +77,7 @@ public class GeneratorConfig {
         this.defaultAuthorizationDataExtends = null;
         this.useJakartaNamespace = false;
         this.jsonOnlyResourceMediaTypes = false;
+        this.legacyXorNestedIdAsserts = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -95,6 +103,7 @@ public class GeneratorConfig {
         this.defaultAuthorizationDataExtends = null;
         this.useJakartaNamespace = false;
         this.jsonOnlyResourceMediaTypes = false;
+        this.legacyXorNestedIdAsserts = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -169,6 +178,14 @@ public class GeneratorConfig {
 
     public void setJsonOnlyResourceMediaTypes(boolean jsonOnlyResourceMediaTypes) {
         this.jsonOnlyResourceMediaTypes = jsonOnlyResourceMediaTypes;
+    }
+
+    public boolean isLegacyXorNestedIdAsserts() {
+        return legacyXorNestedIdAsserts;
+    }
+
+    public void setLegacyXorNestedIdAsserts(boolean legacyXorNestedIdAsserts) {
+        this.legacyXorNestedIdAsserts = legacyXorNestedIdAsserts;
     }
 
     public String getDefaultAuthorizationDataExtends() {
@@ -283,6 +300,7 @@ public class GeneratorConfig {
         private String defaultAuthorizationDataExtends = null;
         private boolean useJakartaNamespace = false;
         private boolean jsonOnlyResourceMediaTypes = false;
+        private boolean legacyXorNestedIdAsserts = false;
         private ObservabilityConfig observabilityConfig = new ObservabilityConfig();
 
         public Builder language(String language) {
@@ -377,6 +395,11 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder legacyXorNestedIdAsserts(boolean legacyXorNestedIdAsserts) {
+            this.legacyXorNestedIdAsserts = legacyXorNestedIdAsserts;
+            return this;
+        }
+
         public Builder observabilityConfig(ObservabilityConfig observabilityConfig) {
             this.observabilityConfig = observabilityConfig;
             return this;
@@ -399,6 +422,7 @@ public class GeneratorConfig {
             config.setDefaultAuthorizationDataExtends(defaultAuthorizationDataExtends);
             config.setUseJakartaNamespace(useJakartaNamespace);
             config.setJsonOnlyResourceMediaTypes(jsonOnlyResourceMediaTypes);
+            config.setLegacyXorNestedIdAsserts(legacyXorNestedIdAsserts);
             config.setObservabilityConfig(observabilityConfig);
             return config;
         }
@@ -433,6 +457,7 @@ public class GeneratorConfig {
                 ", defaultAuthorizationDataExtends='" + defaultAuthorizationDataExtends + '\'' +
                 ", useJakartaNamespace=" + useJakartaNamespace +
                 ", jsonOnlyResourceMediaTypes=" + jsonOnlyResourceMediaTypes +
+                ", legacyXorNestedIdAsserts=" + legacyXorNestedIdAsserts +
                 ", observabilityConfig=" + observabilityConfig +
                 '}';
     }

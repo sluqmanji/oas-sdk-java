@@ -35,6 +35,10 @@ class JerseyModelGenerator {
                 && "true".equals(String.valueOf(ctx.config.getAdditionalProperties().get("standaloneMode")));
     }
 
+    private boolean legacyXorNestedIdAsserts() {
+        return ctx.config != null && ctx.config.isLegacyXorNestedIdAsserts();
+    }
+
     /** Holder for wrapper inner class to generate: outer property name, wrapper class name, inner property name, item type name. */
     static final class WrapperToGenerate {
         final String fieldName;
@@ -363,9 +367,9 @@ class JerseyModelGenerator {
                 oneOfXorAssertBlock.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
                 oneOfXorAssertBlock.append("    }\n\n");
                 appendOneOfXorNestedIdAssertTrue(oneOfXorAssertBlock, oneOfXorInfo.sortedJson0(), oneOfXorInfo.nestedIdRequiredForSorted0(),
-                        schemaName, allProperties, isArrayType, spec);
+                        schemaName, allProperties, isArrayType, spec, legacyXorNestedIdAsserts());
                 appendOneOfXorNestedIdAssertTrue(oneOfXorAssertBlock, oneOfXorInfo.sortedJson1(), oneOfXorInfo.nestedIdRequiredForSorted1(),
-                        schemaName, allProperties, isArrayType, spec);
+                        schemaName, allProperties, isArrayType, spec, legacyXorNestedIdAsserts());
                 for (String fn : fieldNames) {
                     if (xorExclusiveJsonNames.contains(fn)) {
                         injectXorAssertsAfterField = fn;
@@ -715,8 +719,8 @@ class JerseyModelGenerator {
 
     /**
      * Emit {@code @AssertTrue} for nested {@code id} when a simple XOR {@code oneOf} branch marks that object with
-     * {@code required: [id]}. Reference or boxed {@code id} uses {@code isSetId()}; primitive numeric {@code id} uses
-     * {@code getId() != 0} (zero treated as unset). Skips when {@code id} is primitive {@code boolean}.
+     * {@code required: [id]}. Predicates prefer OpenAPI {@code id} type over inferred Java type so merged refs cannot
+     * force a wrong numeric check on string IDs. Skips when {@code id} is primitive {@code boolean}.
      */
     private void appendOneOfXorNestedIdAssertTrue(
             StringBuilder content,
@@ -725,7 +729,8 @@ class JerseyModelGenerator {
             String schemaName,
             Map<String, Object> allProperties,
             boolean isArrayType,
-            Map<String, Object> spec) {
+            Map<String, Object> spec,
+            boolean legacyXorNestedIdAsserts) {
         if (!nestedIdRequired) {
             return;
         }
@@ -740,15 +745,21 @@ class JerseyModelGenerator {
         if (idSchema == null) {
             return;
         }
-        String xorFieldType = typeUtils.getFieldTypeForModelProperty(schemaName, xorJsonName, xorSchema, isArrayType, spec);
-        String idJavaType = typeUtils.getFieldTypeForModelProperty(xorFieldType, "id", idSchema, false, spec);
+        Map<String, Object> idEff = JerseySchemaUtils.resolveCompositionToEffectiveSchema(idSchema, spec);
+        if (idEff == null) {
+            idEff = idSchema;
+        }
+        String idJavaType = typeUtils.getFieldTypeForModelProperty(schemaName, "id", idEff, false, spec);
         String javaField = JerseyNamingUtils.toModelFieldName(xorJsonName);
-        String returnClause = nestedIdAssertTrueReturnClause(javaField, idJavaType);
+        String openApiType = openApiScalarType(idEff);
+        String returnClause = nestedXorNestedIdReturnClause(javaField, xorJsonName, idJavaType, openApiType, legacyXorNestedIdAsserts);
         if (returnClause == null) {
             return;
         }
         String methodCap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaField);
-        String msg = xorJsonName + ".id must be set";
+        String msg = legacyXorNestedIdAsserts
+                ? xorJsonName + ".id must be set when " + xorJsonName + " attribute is set"
+                : xorJsonName + ".id must be set";
         content.append("    @XmlTransient\n");
         content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(msg)).append("\")\n");
         content.append("    public boolean required").append(methodCap).append("IdMissing() {\n");
@@ -756,10 +767,29 @@ class JerseyModelGenerator {
         content.append("    }\n\n");
     }
 
+    private static String openApiScalarType(Map<String, Object> idEff) {
+        if (idEff == null) {
+            return null;
+        }
+        Object t = idEff.get("type");
+        return t instanceof String ? (String) t : null;
+    }
+
     /**
      * @return {@code null} when no {@code @AssertTrue} should be emitted (e.g. primitive {@code boolean} id).
      */
-    private static String nestedIdAssertTrueReturnClause(String javaField, String idJavaType) {
+    static String nestedXorNestedIdReturnClause(
+            String javaField,
+            String xorJsonName,
+            String idJavaType,
+            String openApiType,
+            boolean legacyXorNestedIdAsserts) {
+        if (legacyXorNestedIdAsserts) {
+            return legacyXorNestedIdReturnClause(javaField, xorJsonName, idJavaType, openApiType);
+        }
+        if ("string".equals(openApiType) || "String".equals(idJavaType)) {
+            return "this." + javaField + " == null || this." + javaField + ".isSetId()";
+        }
         if (JerseyTypeUtils.isJavaPrimitiveType(idJavaType)) {
             if ("boolean".equals(idJavaType)) {
                 return null;
@@ -777,7 +807,56 @@ class JerseyModelGenerator {
             }
             return "this." + javaField + " == null || " + comparison;
         }
+        String boxed = boxedNumericIdPresentClause(javaField, idJavaType);
+        if (boxed != null) {
+            return boxed;
+        }
         return "this." + javaField + " == null || this." + javaField + ".isSetId()";
+    }
+
+    /**
+     * Legacy eGain-style XOR nested-id predicates ({@code GeneratorConfig.isLegacyXorNestedIdAsserts()}).
+     * Note: the {@code parent} branch matches historical bindings; it inverts usual {@code @AssertTrue} semantics.
+     */
+    private static String legacyXorNestedIdReturnClause(String javaField, String xorJsonName, String idJavaType, String openApiType) {
+        if ("parent".equals(xorJsonName)) {
+            return "(this." + javaField + " != null && !this." + javaField + ".isSetId())";
+        }
+        if ("string".equals(openApiType) || "String".equals(idJavaType)) {
+            return "(this." + javaField + " != null && !this." + javaField + ".isSetId())";
+        }
+        if (JerseyTypeUtils.isJavaPrimitiveType(idJavaType)) {
+            if ("boolean".equals(idJavaType)) {
+                return null;
+            }
+            String idGetter = "get" + JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName("id"));
+            return "(this." + javaField + " != null && this." + javaField + "." + idGetter + "() == 0)";
+        }
+        if ("integer".equals(openApiType) || "number".equals(openApiType)
+                || "Integer".equals(idJavaType) || "Long".equals(idJavaType) || "Short".equals(idJavaType) || "Byte".equals(idJavaType)
+                || "Double".equals(idJavaType) || "Float".equals(idJavaType)) {
+            String idGetter = "get" + JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName("id"));
+            return "(this." + javaField + " != null && (this." + javaField + "." + idGetter + "() == null || this." + javaField + "." + idGetter + "() == 0))";
+        }
+        return "(this." + javaField + " != null && !this." + javaField + ".isSetId())";
+    }
+
+    /**
+     * @return {@code null} when {@code idJavaType} is not a boxed numeric type we can compare to zero.
+     */
+    private static String boxedNumericIdPresentClause(String javaField, String idJavaType) {
+        if (idJavaType == null) {
+            return null;
+        }
+        String idGetter = "get" + JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName("id"));
+        String base = "this." + javaField + " == null || this." + javaField + "." + idGetter + "() == null || ";
+        return switch (idJavaType) {
+            case "Integer", "Short", "Byte" -> base + "this." + javaField + "." + idGetter + "() != 0";
+            case "Long" -> base + "this." + javaField + "." + idGetter + "() != 0L";
+            case "Double" -> base + "this." + javaField + "." + idGetter + "() != 0.0";
+            case "Float" -> base + "this." + javaField + "." + idGetter + "() != 0.0f";
+            default -> null;
+        };
     }
 
     // ---------------------------------------------------------------------------
