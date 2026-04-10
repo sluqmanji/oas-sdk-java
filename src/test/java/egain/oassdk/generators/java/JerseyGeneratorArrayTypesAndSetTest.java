@@ -934,66 +934,37 @@ public class JerseyGeneratorArrayTypesAndSetTest {
 
     @Test
     @DisplayName("getJavaType returns List for inlined object-with-single-array response schema")
-    public void testGetJavaTypeReturnsListForInlinedObjectWithSingleArrayResponse() throws OASSDKException, IOException {
-        String yamlContent = """
-            openapi: 3.0.0
-            info:
-              title: Test API
-              version: 1.0.0
-            servers:
-              - url: https://api.example.com/v1
-            paths:
-              /tag-categories:
-                get:
-                  summary: Get tag categories list
-                  operationId: getTagCategories
-                  responses:
-                    '200':
-                      description: OK
-                      content:
-                        application/json:
-                          schema:
-                            type: object
-                            properties:
-                              tagCategory:
-                                type: array
-                                items:
-                                  $ref: '#/components/schemas/TagCategory'
-            components:
-              schemas:
-                TagCategory:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                    name:
-                      type: string
-            """;
+    public void testGetJavaTypeReturnsListForInlinedObjectWithSingleArrayResponse() {
+        Map<String, Object> tagCategory = new LinkedHashMap<>();
+        tagCategory.put("type", "object");
+        Map<String, Object> tcProps = new LinkedHashMap<>();
+        tcProps.put("id", Map.of("type", "string"));
+        tcProps.put("name", Map.of("type", "string"));
+        tagCategory.put("properties", tcProps);
 
-        Path testSpecFile = tempOutputDir.resolve("inline-array-ref-response-spec.yaml");
-        Files.writeString(testSpecFile, yamlContent);
+        Map<String, Object> items = new LinkedHashMap<>();
+        items.put("$ref", "#/components/schemas/TagCategory");
+        Map<String, Object> tagCategoryField = new LinkedHashMap<>();
+        tagCategoryField.put("type", "array");
+        tagCategoryField.put("items", items);
+        Map<String, Object> responseProps = new LinkedHashMap<>();
+        responseProps.put("tagCategory", tagCategoryField);
+        Map<String, Object> responseSchema = new LinkedHashMap<>();
+        responseSchema.put("type", "object");
+        responseSchema.put("properties", responseProps);
 
-        Path outputDir = tempOutputDir.resolve("generated-sdk");
-        String packageName = "com.test.api";
+        Map<String, Object> schemas = new LinkedHashMap<>();
+        schemas.put("TagCategory", tagCategory);
+        Map<String, Object> components = new LinkedHashMap<>();
+        components.put("schemas", schemas);
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("openapi", "3.0.0");
+        spec.put("components", components);
 
-        OASSDK sdk = new OASSDK();
-        sdk.loadSpec(testSpecFile.toString());
-        sdk.generateApplication("java", "jersey", packageName, outputDir.toString());
-
-        Path executorFile = outputDir.resolve("src/main/java")
-            .resolve(packageName.replace(".", "/"))
-            .resolve("executor/GetTagCategoriesBOExecutor.java");
-
-        assertTrue(Files.exists(executorFile),
-            "GetTagCategoriesBOExecutor.java should be generated");
-
-        String content = Files.readString(executorFile);
-
-        // getJavaType() should resolve inlined object-with-single-array to List<TagCategory>, not Object
-        assertTrue(content.contains("GetBOExecutor_2<"),
-            "Executor base class should be GetBOExecutor_2<List<TagCategory>> for inlined object-with-single-array schema");
-        assertTrue(content.contains("private List<TagCategory> mResponseData") || content.contains("List<TagCategory> mResponseData"),
-            "Executor should declare mResponseData as List<TagCategory>");
+        JerseyGenerationContext ctx = new JerseyGenerationContext(spec, "", null, "com.test.api");
+        JerseyTypeUtils typeUtils = new JerseyTypeUtils(ctx);
+        assertEquals("List<TagCategory>", typeUtils.getJavaType(responseSchema),
+            "getJavaType should resolve inlined object-with-single-array to List<TagCategory>, not Object");
     }
 
     /**

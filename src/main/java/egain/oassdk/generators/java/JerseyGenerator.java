@@ -85,15 +85,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 buildGenerator.generateExceptionMappers(outputDir, packageName);
                 buildGenerator.generateBuildFiles(spec, outputDir, packageName);
 
-                // Executor generation requires eGain platform classes (GetBOExecutor_2, CallerContext, etc.)
-                // Skip when standaloneMode is enabled to avoid uncompilable output
-                boolean standaloneMode = config != null && config.getAdditionalProperties() != null
-                        && "true".equals(String.valueOf(config.getAdditionalProperties().get("standaloneMode")));
-                if (!standaloneMode) {
-                    new JerseyExecutorGenerator(ctx, this::getJavaType)
-                            .generateExecutors(spec, outputDir, packageName);
-                }
-
                 new JerseyObservabilityGenerator(ctx).generate();
             }
 
@@ -120,7 +111,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 outputDir + "/src/main/java/" + packagePath + "/resources",
                 outputDir + "/src/main/java/" + packagePath + "/model",
                 outputDir + "/src/main/java/" + packagePath + "/service",
-                outputDir + "/src/main/java/" + packagePath + "/executor",
                 outputDir + "/src/main/java/" + packagePath + "/config",
                 outputDir + "/src/main/java/" + packagePath + "/exception",
                 outputDir + "/src/main/resources",

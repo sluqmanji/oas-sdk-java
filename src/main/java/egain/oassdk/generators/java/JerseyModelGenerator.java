@@ -226,9 +226,9 @@ class JerseyModelGenerator {
         // required/readOnly; strip those for the pair and enforce XOR via @AssertTrue on the bean.
         Set<String> xorExclusiveJsonNames = Collections.emptySet();
         String[] oneOfXorPair = null;
-        JerseyExecutorSpecValidation.SimpleOneOfXorInfo oneOfXorInfo = null;
+        JerseySchemaOneOfXor.SimpleOneOfXorInfo oneOfXorInfo = null;
         if (!isArrayType) {
-            oneOfXorInfo = JerseyExecutorSpecValidation.findSimpleOneOfXorInfo(
+            oneOfXorInfo = JerseySchemaOneOfXor.findSimpleOneOfXorInfo(
                     schema, spec, new IdentityHashMap<>(), 0);
             if (oneOfXorInfo != null) {
                 oneOfXorPair = new String[] { oneOfXorInfo.sortedJson0(), oneOfXorInfo.sortedJson1() };
