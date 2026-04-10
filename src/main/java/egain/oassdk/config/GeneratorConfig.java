@@ -41,6 +41,12 @@ public class GeneratorConfig {
      *  When false (default), uses {@code javax.*} namespace (Java EE 8 and earlier). */
     private boolean useJakartaNamespace;
 
+    /**
+     * When true, JAX-RS resources use JSON-only {@code @Produces}/{@code @Consumes}.
+     * When false (default), media types are inferred from operation content when possible; if none are found, XML+JSON is used.
+     */
+    private boolean jsonOnlyResourceMediaTypes;
+
     // Observability configuration (OpenTelemetry + Micrometer)
     private ObservabilityConfig observabilityConfig;
 
@@ -63,6 +69,7 @@ public class GeneratorConfig {
         this.authorizationDataGenerationEnabled = false;
         this.defaultAuthorizationDataExtends = null;
         this.useJakartaNamespace = false;
+        this.jsonOnlyResourceMediaTypes = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -87,6 +94,7 @@ public class GeneratorConfig {
         this.authorizationDataGenerationEnabled = false;
         this.defaultAuthorizationDataExtends = null;
         this.useJakartaNamespace = false;
+        this.jsonOnlyResourceMediaTypes = false;
         this.observabilityConfig = new ObservabilityConfig();
     }
 
@@ -153,6 +161,14 @@ public class GeneratorConfig {
 
     public void setUseJakartaNamespace(boolean useJakartaNamespace) {
         this.useJakartaNamespace = useJakartaNamespace;
+    }
+
+    public boolean isJsonOnlyResourceMediaTypes() {
+        return jsonOnlyResourceMediaTypes;
+    }
+
+    public void setJsonOnlyResourceMediaTypes(boolean jsonOnlyResourceMediaTypes) {
+        this.jsonOnlyResourceMediaTypes = jsonOnlyResourceMediaTypes;
     }
 
     public String getDefaultAuthorizationDataExtends() {
@@ -266,6 +282,7 @@ public class GeneratorConfig {
         private boolean authorizationDataGenerationEnabled = false;
         private String defaultAuthorizationDataExtends = null;
         private boolean useJakartaNamespace = false;
+        private boolean jsonOnlyResourceMediaTypes = false;
         private ObservabilityConfig observabilityConfig = new ObservabilityConfig();
 
         public Builder language(String language) {
@@ -355,6 +372,11 @@ public class GeneratorConfig {
             return this;
         }
 
+        public Builder jsonOnlyResourceMediaTypes(boolean jsonOnlyResourceMediaTypes) {
+            this.jsonOnlyResourceMediaTypes = jsonOnlyResourceMediaTypes;
+            return this;
+        }
+
         public Builder observabilityConfig(ObservabilityConfig observabilityConfig) {
             this.observabilityConfig = observabilityConfig;
             return this;
@@ -376,6 +398,7 @@ public class GeneratorConfig {
             config.setAuthorizationDataGenerationEnabled(authorizationDataGenerationEnabled);
             config.setDefaultAuthorizationDataExtends(defaultAuthorizationDataExtends);
             config.setUseJakartaNamespace(useJakartaNamespace);
+            config.setJsonOnlyResourceMediaTypes(jsonOnlyResourceMediaTypes);
             config.setObservabilityConfig(observabilityConfig);
             return config;
         }
@@ -409,6 +432,7 @@ public class GeneratorConfig {
                 ", authorizationDataGenerationEnabled=" + authorizationDataGenerationEnabled +
                 ", defaultAuthorizationDataExtends='" + defaultAuthorizationDataExtends + '\'' +
                 ", useJakartaNamespace=" + useJakartaNamespace +
+                ", jsonOnlyResourceMediaTypes=" + jsonOnlyResourceMediaTypes +
                 ", observabilityConfig=" + observabilityConfig +
                 '}';
     }

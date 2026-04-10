@@ -15,6 +15,8 @@ class JerseyResourceGenerator {
 
     private static final java.util.regex.Pattern VERSION_PATTERN = java.util.regex.Pattern.compile("(/v\\d+)");
 
+    static final String X_EGAIN_RESOURCE_CLASS_NAME = "x-egain-resource-class-name";
+
     private final JerseyGenerationContext ctx;
     /**
      * Function to resolve an OpenAPI schema map to a Java type string.
@@ -166,46 +168,44 @@ class JerseyResourceGenerator {
         return parentPath;
     }
 
-    /**
-     * Extract security information from operations and generate @Actor annotation.
-     */
-    private String generateActorAnnotation(List<PathOperation> operations) {
-        Set<String> actorTypes = new HashSet<>();
-        Set<String> scopes = new HashSet<>();
-
-        // Map security scheme names to ActorType enum values
+    private static Map<String, String> securitySchemeToActorTypeMap() {
         Map<String, String> securitySchemeToActorType = new LinkedHashMap<>();
         securitySchemeToActorType.put("oAuthUser", "USER");
         securitySchemeToActorType.put("oAuthCustomer", "CUSTOMER");
         securitySchemeToActorType.put("oAuthAnonymousCustomer", "ANONYMOUS_CUSTOMER");
         securitySchemeToActorType.put("oAuthClient", "CLIENT_APP");
+        securitySchemeToActorType.put("oAuthOnBehalfOfUser", "CLIENT_ON_BEHALF_OF_USER");
+        securitySchemeToActorType.put("oAuthOnBehalfOfCustomer", "CLIENT_ON_BEHALF_OF_CUSTOMER");
+        return securitySchemeToActorType;
+    }
 
-        // Extract security information from all operations
-        for (PathOperation pathOp : operations) {
-            Map<String, Object> operation = pathOp.operation;
-            if (operation != null && operation.containsKey("security")) {
-                List<Map<String, Object>> securityList = Util.asStringObjectMapList(operation.get("security"));
-                if (securityList != null) {
-                    for (Map<String, Object> securityMap : securityList) {
-                        if (securityMap != null) {
-                            for (Map.Entry<String, Object> entry : securityMap.entrySet()) {
-                                String schemeName = entry.getKey();
-                                String actorType = securitySchemeToActorType.get(schemeName);
-                                if (actorType != null) {
-                                    actorTypes.add(actorType);
-                                }
+    /**
+     * Extract security information from a single operation and generate {@code @Actor} annotation.
+     */
+    private String generateActorAnnotationForOperation(Map<String, Object> operation) {
+        Set<String> actorTypes = new HashSet<>();
+        Set<String> scopes = new HashSet<>();
+        Map<String, String> securitySchemeToActorType = securitySchemeToActorTypeMap();
 
-                                // Extract scopes
-                                if (entry.getValue() instanceof List<?> scopeList) {
-                                    for (Object scope : scopeList) {
-                                        if (scope instanceof String scopeStr) {
-                                            // Remove ${SCOPE_PREFIX} if present and convert to enum format
-                                            scopeStr = scopeStr.replace("${SCOPE_PREFIX}", "");
-                                            // Convert scope to enum format: knowledge.contentmgr.read -> KNOWLEDGE_CONTENTMGR_READ
-                                            String enumScope = convertScopeToEnum(scopeStr);
-                                            if (enumScope != null && !enumScope.isEmpty()) {
-                                                scopes.add(enumScope);
-                                            }
+        if (operation != null && operation.containsKey("security")) {
+            List<Map<String, Object>> securityList = Util.asStringObjectMapList(operation.get("security"));
+            if (securityList != null) {
+                for (Map<String, Object> securityMap : securityList) {
+                    if (securityMap != null) {
+                        for (Map.Entry<String, Object> entry : securityMap.entrySet()) {
+                            String schemeName = entry.getKey();
+                            String actorType = securitySchemeToActorType.get(schemeName);
+                            if (actorType != null) {
+                                actorTypes.add(actorType);
+                            }
+
+                            if (entry.getValue() instanceof List<?> scopeList) {
+                                for (Object scope : scopeList) {
+                                    if (scope instanceof String scopeStr) {
+                                        scopeStr = scopeStr.replace("${SCOPE_PREFIX}", "");
+                                        String enumScope = convertScopeToEnum(scopeStr);
+                                        if (enumScope != null && !enumScope.isEmpty()) {
+                                            scopes.add(enumScope);
                                         }
                                     }
                                 }
@@ -216,33 +216,28 @@ class JerseyResourceGenerator {
             }
         }
 
-        // If no security found, return default @Actor
         if (actorTypes.isEmpty() && scopes.isEmpty()) {
-            return "@Actor\n";
+            return "    @Actor\n";
         }
 
-        // Build @Actor annotation
-        StringBuilder actorAnnotation = new StringBuilder("@Actor(type = { ");
+        StringBuilder actorAnnotation = new StringBuilder("    @Actor(type = { ");
 
-        // Add actor types
         if (!actorTypes.isEmpty()) {
             List<String> sortedActorTypes = new ArrayList<>(actorTypes);
-            java.util.Collections.sort(sortedActorTypes);
+            Collections.sort(sortedActorTypes);
             for (int i = 0; i < sortedActorTypes.size(); i++) {
                 if (i > 0) actorAnnotation.append(", ");
                 actorAnnotation.append("ActorType.").append(sortedActorTypes.get(i));
             }
         } else {
-            // Default to CLIENT_APP if no actor types found
             actorAnnotation.append("ActorType.CLIENT_APP");
         }
 
         actorAnnotation.append(" }, scope = {");
 
-        // Add scopes
         if (!scopes.isEmpty()) {
             List<String> sortedScopes = new ArrayList<>(scopes);
-            java.util.Collections.sort(sortedScopes);
+            Collections.sort(sortedScopes);
             actorAnnotation.append("\n");
             for (int i = 0; i < sortedScopes.size(); i++) {
                 if (i > 0) actorAnnotation.append(",\n");
@@ -260,20 +255,108 @@ class JerseyResourceGenerator {
      * Convert scope string to enum format.
      * Examples:
      * knowledge.contentmgr.read -> KNOWLEDGE_CONTENTMGR_READ
-     * knowledge.portalmgr.manage -> KNOWLEDGE_PORTALMGR_MANAGE
+     * knowledge.contentmgr.onbehalfof.read -> KNOWLEDGE_CONTENTMGR_CLIENT_ON_BEHALF_OF_READ
      */
     private String convertScopeToEnum(String scope) {
         if (scope == null || scope.isEmpty()) {
             return null;
         }
 
-        // Replace dots and hyphens with underscores, convert to uppercase
-        String enumScope = scope.replace(".", "_").replace("-", "_").toUpperCase(Locale.ROOT);
+        String normalized = scope.replace("${SCOPE_PREFIX}", "");
+        String[] parts = normalized.split("\\.");
+        for (int i = 0; i < parts.length; i++) {
+            if ("onbehalfof".equalsIgnoreCase(parts[i])) {
+                parts[i] = "client_on_behalf_of";
+            }
+        }
+        normalized = String.join(".", parts);
 
-        // Remove any remaining special characters that aren't valid in enum names
+        String enumScope = normalized.replace(".", "_").replace("-", "_").toUpperCase(Locale.ROOT);
         enumScope = enumScope.replaceAll("[^A-Z0-9_]", "");
 
         return enumScope;
+    }
+
+    private void appendClassLevelMediaAnnotations(StringBuilder content, List<PathOperation> operations) {
+        boolean jsonOnlyConfig = ctx.config != null && ctx.config.isJsonOnlyResourceMediaTypes();
+        Set<String> collected = new LinkedHashSet<>();
+        for (PathOperation po : operations) {
+            collectMediaTypesFromOperation(po.operation, ctx.spec, collected);
+        }
+
+        boolean hasXml = collected.stream().anyMatch(JerseyResourceGenerator::mediaTypeImpliesXml);
+
+        if (jsonOnlyConfig) {
+            content.append("@Produces(MediaType.APPLICATION_JSON)\n");
+            content.append("@Consumes(MediaType.APPLICATION_JSON)\n");
+            return;
+        }
+
+        if (collected.isEmpty()) {
+            content.append("@Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
+            content.append("@Consumes({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
+            return;
+        }
+
+        if (hasXml) {
+            content.append("@Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
+            content.append("@Consumes({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
+        } else {
+            content.append("@Produces(MediaType.APPLICATION_JSON)\n");
+            content.append("@Consumes(MediaType.APPLICATION_JSON)\n");
+        }
+    }
+
+    private static boolean mediaTypeImpliesXml(String mediaType) {
+        return mediaType != null && mediaType.toLowerCase(Locale.ROOT).contains("xml");
+    }
+
+    private void collectMediaTypesFromOperation(Map<String, Object> operation, Map<String, Object> spec, Set<String> out) {
+        if (operation == null) {
+            return;
+        }
+        Map<String, Object> requestBody = Util.asStringObjectMap(operation.get("requestBody"));
+        if (requestBody != null) {
+            extractContentMediaTypeKeys(requestBody, out);
+        }
+        Map<String, Object> responses = Util.asStringObjectMap(operation.get("responses"));
+        if (responses != null) {
+            for (Object respObj : responses.values()) {
+                Map<String, Object> resp = Util.asStringObjectMap(respObj);
+                if (resp == null) {
+                    continue;
+                }
+                if (resp.containsKey("$ref") && spec != null) {
+                    resp = resolveResponseRef(resp, spec);
+                }
+                extractContentMediaTypeKeys(resp, out);
+            }
+        }
+    }
+
+    private static void extractContentMediaTypeKeys(Map<String, Object> holder, Set<String> out) {
+        Map<String, Object> content = Util.asStringObjectMap(holder.get("content"));
+        if (content != null) {
+            out.addAll(content.keySet());
+        }
+    }
+
+    private static Map<String, Object> resolveResponseRef(Map<String, Object> resp, Map<String, Object> spec) {
+        String ref = (String) resp.get("$ref");
+        if (ref == null || !ref.startsWith("#/components/responses/")) {
+            return resp;
+        }
+        String name = ref.substring("#/components/responses/".length());
+        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+        if (components == null) {
+            return resp;
+        }
+        Map<String, Object> responses = Util.asStringObjectMap(components.get("responses"));
+        if (responses == null) {
+            return resp;
+        }
+        Map<String, Object> resolved = Util.asStringObjectMap(responses.get(name));
+        return resolved != null ? resolved : resp;
     }
 
     /**
@@ -281,7 +364,7 @@ class JerseyResourceGenerator {
      */
     private void generateResourceForParentPath(String parentPath, List<PathOperation> operations,
                                                String outputDir, String packagePath, Map<String, Object> spec) throws IOException, GenerationException {
-        String resourceName = generateResourceName(parentPath);
+        String resourceName = generateResourceName(parentPath, spec);
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".resources;\n\n");
@@ -292,29 +375,33 @@ class JerseyResourceGenerator {
         content.append("import ").append(packagePath).append(".model.*;\n");
         content.append("import egain.framework.Actor;\n");
         content.append("import egain.framework.ActorType;\n");
-        content.append("import egain.framework.OAuthScope;\n\n");
+        content.append("import egain.framework.OAuthScope;\n");
 
-        // Extract API version from path and construct @Path
-        String apiPath = extractApiPathWithVersion(parentPath, operations, spec);
-        content.append("@Path(\"").append(apiPath).append("\")\n");
-        content.append("@Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
-        content.append("@Consumes({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})\n");
-
-        // Generate @Actor annotation with security information
-        content.append(generateActorAnnotation(operations));
-
-        content.append("public class ").append(resourceName).append(" {\n\n");
-
-        // Generate methods for each operation
+        boolean needsListImport = false;
+        StringBuilder body = new StringBuilder();
         for (PathOperation pathOp : operations) {
             String relativePath = getRelativePath(parentPath, pathOp.path);
             try {
-                generateResourceMethod(pathOp.method, pathOp.operation, relativePath, content);
+                if (generateResourceMethod(pathOp.method, pathOp.operation, relativePath, body)) {
+                    needsListImport = true;
+                }
             } catch (GenerationException e) {
                 throw new GenerationException("Failed to generate resource method for " + pathOp.method + " " + pathOp.path + ": " + e.getMessage(), e);
             }
         }
 
+        if (needsListImport) {
+            content.append("import java.util.List;\n");
+        }
+        content.append("\n");
+
+        // Extract API version from path and construct @Path
+        String apiPath = extractApiPathWithVersion(parentPath, operations, spec);
+        content.append("@Path(\"").append(apiPath).append("\")\n");
+        appendClassLevelMediaAnnotations(content, operations);
+
+        content.append("public class ").append(resourceName).append(" {\n\n");
+        content.append(body);
         content.append("}\n");
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/resources/" + resourceName + ".java", content.toString());
@@ -346,33 +433,38 @@ class JerseyResourceGenerator {
 
     /**
      * Generate resource method.
+     *
+     * @return true if the signature uses {@link List} and {@code import java.util.List} is required
      */
-    private void generateResourceMethod(String method, Map<String, Object> operation, String relativePath, StringBuilder content) throws GenerationException {
+    private boolean generateResourceMethod(String method, Map<String, Object> operation, String relativePath, StringBuilder content) throws GenerationException {
         String operationId = (String) operation.get("operationId");
         String summary = (String) operation.get("summary");
 
-        // Get HTTP method annotation
         String httpMethod = method.toUpperCase(Locale.ROOT);
 
-        // Add HTTP method annotation
         content.append("    @").append(httpMethod).append("\n");
 
-        // Add path annotation if relative path is not empty
         if (relativePath != null && !relativePath.isEmpty()) {
             content.append("    @Path(\"").append(relativePath).append("\")\n");
         }
 
-        // Extract parameters and generate method signature
+        boolean hasRequestBody = false;
+        if (method.equalsIgnoreCase("post") || method.equalsIgnoreCase("put") || method.equalsIgnoreCase("patch")) {
+            Map<String, Object> requestBody = Util.asStringObjectMap(operation.get("requestBody"));
+            hasRequestBody = requestBody != null;
+        }
+        if ((method.equalsIgnoreCase("get") || method.equalsIgnoreCase("delete") || method.equalsIgnoreCase("head")) && !hasRequestBody) {
+            content.append("    @Consumes\n");
+        }
+
+        content.append(generateActorAnnotationForOperation(operation));
+
         List<Map<String, Object>> params = Util.asStringObjectMapList(operation.get("parameters"));
         List<String> parameterList = new ArrayList<>();
+        boolean needsList = false;
 
-        // Handle request body for POST/PUT/PATCH
-        if ((method.equalsIgnoreCase("post") || method.equalsIgnoreCase("put") || method.equalsIgnoreCase("patch"))) {
-            Map<String, Object> requestBody = Util.asStringObjectMap(operation.get("requestBody"));
-            if (requestBody != null) {
-                // For simplicity, assume JSON request body
-                parameterList.add("Object requestBody");
-            }
+        if (hasRequestBody) {
+            parameterList.add("Object requestBody");
         }
 
         if (params != null) {
@@ -381,13 +473,11 @@ class JerseyResourceGenerator {
                 String in = (String) param.get("in");
                 Map<String, Object> schema = Util.asStringObjectMap(param.get("schema"));
 
-                // Skip header parameters as they are handled by the framework
                 if ("header".equals(in)) {
                     continue;
                 }
 
                 if (name != null && in != null && schema != null) {
-                    // Validate and sanitize parameter name for Java
                     String sanitizedName = JerseyNamingUtils.sanitizeParameterName(name);
                     if (sanitizedName == null) {
                         throw new GenerationException("The endpoint request param contains the invalid variable name: " + name +
@@ -395,9 +485,11 @@ class JerseyResourceGenerator {
                     }
 
                     String javaType = javaTypeResolver.apply(schema);
+                    if (javaType != null && javaType.contains("List<")) {
+                        needsList = true;
+                    }
                     String annotation = getParameterAnnotation(in);
 
-                    // Build parameter string with parameter annotation (validation annotations removed)
                     String paramBuilder = annotation + "(\"" + name + "\") " +
                             javaType + " " + sanitizedName;
 
@@ -406,11 +498,9 @@ class JerseyResourceGenerator {
             }
         }
 
-        // Generate method signature (normalize operationId to valid Java method name when present)
         String methodName = (operationId != null && !operationId.isEmpty()) ? JerseyNamingUtils.toJavaMethodName(operationId) : method;
         content.append("    public Response ").append(methodName).append("(");
         if (!parameterList.isEmpty()) {
-            // Join parameters, handling multi-line annotations
             for (int i = 0; i < parameterList.size(); i++) {
                 if (i > 0) {
                     content.append(",\n            ");
@@ -426,6 +516,8 @@ class JerseyResourceGenerator {
         content.append("        // Replace this with actual business logic implementation\n");
         content.append("        return Response.ok().build();\n");
         content.append("    }\n\n");
+
+        return needsList;
     }
 
     /**
@@ -439,15 +531,57 @@ class JerseyResourceGenerator {
         };
     }
 
+    private String findResourceClassNameExtension(String parentPath, Map<String, Object> spec) {
+        Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
+        if (paths == null) {
+            return null;
+        }
+        String norm = parentPath.startsWith("/") ? parentPath : "/" + parentPath;
+        for (Map.Entry<String, Object> e : paths.entrySet()) {
+            String p = e.getKey();
+            if (!p.equals(norm) && !p.startsWith(norm + "/")) {
+                continue;
+            }
+            Map<String, Object> item = Util.asStringObjectMap(e.getValue());
+            if (item == null) {
+                continue;
+            }
+            Object ext = item.get(X_EGAIN_RESOURCE_CLASS_NAME);
+            if (ext instanceof String s && !s.isBlank()) {
+                return s.trim();
+            }
+        }
+        return null;
+    }
+
     /**
-     * Generate resource class name from a path.
+     * Generate resource class name from parent path, optional {@value #X_EGAIN_RESOURCE_CLASS_NAME}, and simple plural heuristic.
      */
-    private String generateResourceName(String path) {
-        String name = path != null ? path.replaceAll("[^a-zA-Z0-9]", "") : "";
+    private String generateResourceName(String parentPath, Map<String, Object> spec) {
+        String fromExtension = findResourceClassNameExtension(parentPath, spec);
+        if (fromExtension != null && !fromExtension.isEmpty()) {
+            String simple = fromExtension.replaceAll("[^a-zA-Z0-9_]", "");
+            if (!simple.isEmpty()) {
+                return simple.substring(0, 1).toUpperCase(Locale.ROOT) + simple.substring(1);
+            }
+        }
+
+        String name = parentPath != null ? parentPath.replaceAll("[^a-zA-Z0-9]", "") : "";
         if (name.isEmpty()) {
             return "RootResource";
         }
-        return name.substring(0, 1).toUpperCase(Locale.ROOT) + name.substring(1) + "Resource";
+        String base = singularizeResourceSegment(name.toLowerCase(Locale.ROOT));
+        return base.substring(0, 1).toUpperCase(Locale.ROOT) + base.substring(1) + "Resource";
+    }
+
+    /**
+     * Simple plural-to-singular for resource segment (e.g. folders -> folder). Conservative: only strips trailing {@code s} when length &gt; 4 and not {@code ...ss}.
+     */
+    private static String singularizeResourceSegment(String segment) {
+        if (segment.length() > 4 && segment.endsWith("s") && !segment.endsWith("ss")) {
+            return segment.substring(0, segment.length() - 1);
+        }
+        return segment;
     }
 
     /**
