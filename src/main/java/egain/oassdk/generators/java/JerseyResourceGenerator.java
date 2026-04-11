@@ -368,9 +368,9 @@ class JerseyResourceGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".resources;\n\n");
-        content.append("import ").append(ctx.wsNs).append(".*;\n");
-        content.append("import ").append(ctx.wsNs).append(".core.MediaType;\n");
-        content.append("import ").append(ctx.wsNs).append(".core.Response;\n");
+        content.append("import ").append(ctx.getWsNs()).append(".*;\n");
+        content.append("import ").append(ctx.getWsNs()).append(".core.MediaType;\n");
+        content.append("import ").append(ctx.getWsNs()).append(".core.Response;\n");
         content.append("import ").append(packagePath).append(".service.*;\n");
         content.append("import ").append(packagePath).append(".model.*;\n");
         content.append("import egain.framework.Actor;\n");

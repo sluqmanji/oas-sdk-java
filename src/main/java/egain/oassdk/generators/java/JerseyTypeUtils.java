@@ -8,7 +8,7 @@ import java.util.*;
  * Type-resolution and validation-annotation utilities for the Jersey generator.
  * Encapsulates the logic for mapping OpenAPI schemas to Java types.
  */
-class JerseyTypeUtils {
+public final class JerseyTypeUtils {
 
     private final JerseyGenerationContext ctx;
 
@@ -23,7 +23,7 @@ class JerseyTypeUtils {
         "Object", "String", "Integer", "Boolean", "Long", "Double", "Float",
         "List", "Map", "XMLGregorianCalendar", "JAXBElement", "QName", "int", "boolean", "long", "double", "float");
 
-    JerseyTypeUtils(JerseyGenerationContext ctx) {
+    public JerseyTypeUtils(JerseyGenerationContext ctx) {
         this.ctx = ctx;
     }
 
@@ -34,7 +34,7 @@ class JerseyTypeUtils {
     /**
      * Convert OpenAPI type to Java type.
      */
-    String getJavaType(Map<String, Object> schema) {
+    public String getJavaType(Map<String, Object> schema) {
         if (schema == null) {
             return "Object";
         }
@@ -264,8 +264,8 @@ class JerseyTypeUtils {
                     }
                 }
                 // Check if this is an in-lined schema
-                if (ctx.inlinedSchemas.containsKey(schema)) {
-                    return ctx.inlinedSchemas.get(schema);
+                if (ctx.getInlinedSchemas().containsKey(schema)) {
+                    return ctx.getInlinedSchemas().get(schema);
                 }
                 // Object with single property that is array of $ref -> List<RefType>
                 String listType = JerseySchemaUtils.getListTypeForObjectWithSingleArrayOfRef(schema, ctx.spec);

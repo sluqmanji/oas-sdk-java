@@ -62,10 +62,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             JerseyModelGenerator modelGenerator = new JerseyModelGenerator(ctx, typeUtils, schemaCollector);
 
             schemaCollector.collectInlinedSchemas(spec);
-            this.inlinedSchemas.putAll(ctx.inlinedSchemas);
+            this.inlinedSchemas.putAll(ctx.getInlinedSchemas());
 
             modelGenerator.generateModels(spec, outputDir, packageName);
-            this.inlinedSchemas.putAll(ctx.inlinedSchemas);
+            this.inlinedSchemas.putAll(ctx.getInlinedSchemas());
 
             if (config != null && config.isAuthorizationDataGenerationEnabled()) {
                 new JerseyAuthorizationDataGenerator().generate(spec, outputDir, config);
@@ -132,7 +132,7 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
         }
         Map<String, Object> spec = currentSpecForResolution.get();
         JerseyGenerationContext tempCtx = new JerseyGenerationContext(spec, null, config, null);
-        tempCtx.inlinedSchemas.putAll(this.inlinedSchemas);
+        tempCtx.getInlinedSchemas().putAll(this.inlinedSchemas);
         return new JerseyTypeUtils(tempCtx).getJavaType(schema);
     }
 

@@ -29,7 +29,7 @@ class JerseyBuildGenerator {
         String packagePath = packageName != null ? packageName : "com.example.api";
         String className = JerseyGenerationContext.getAPITitle(spec).replaceAll("[^a-zA-Z0-9]", "") + "Application";
 
-        String wsNs = ctx.wsNs;
+        String wsNs = ctx.getWsNs();
         String content = String.format("""
                 package %s;
 
@@ -165,7 +165,7 @@ class JerseyBuildGenerator {
                         responseContext.getHeaders().add("Access-Control-Allow-Headers", "*");
                     }
                 }
-                """, packagePath, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
+                """, packagePath, ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs());
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/config/CorsFilter.java", configContent);
     }
@@ -199,7 +199,7 @@ class JerseyBuildGenerator {
                                 .build();
                     }
                 }
-                """, packagePath, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
+                """, packagePath, ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs());
 
         JerseyGenerationContext.writeFile(outputDir + "/src/main/java/" + packagePath.replace(".", "/") + "/exception/GenericExceptionMapper.java", exceptionContent);
     }
@@ -437,7 +437,7 @@ class JerseyBuildGenerator {
      */
     public String generateWebXml(String packageName) {
         String packagePath = packageName != null ? packageName : "com.example.api";
-        String wsApplication = ctx.wsNs + ".Application";
+        String wsApplication = ctx.getWsNs() + ".Application";
 
         if (ctx.useJakarta) {
             return String.format("""

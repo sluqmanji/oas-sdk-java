@@ -6,7 +6,7 @@ import java.util.Locale;
  * Pure naming / string-conversion utilities extracted from JerseyGenerator.
  * All methods are stateless and static.
  */
-final class JerseyNamingUtils {
+public final class JerseyNamingUtils {
 
     private JerseyNamingUtils() {
         // utility class – no instances
@@ -15,7 +15,7 @@ final class JerseyNamingUtils {
     /**
      * Convert schema name to valid Java class name
      */
-    static String toJavaClassName(String schemaName) {
+    public static String toJavaClassName(String schemaName) {
         if (schemaName == null || schemaName.isEmpty()) {
             return "Unknown";
         }
@@ -47,7 +47,7 @@ final class JerseyNamingUtils {
      * Convert operationId to valid Java method name (camelCase, first letter lower).
      * Handles hyphens, underscores, spaces, dots as word breaks (e.g. get-jobId-status -> getJobIdStatus).
      */
-    static String toJavaMethodName(String operationId) {
+    public static String toJavaMethodName(String operationId) {
         if (operationId == null || operationId.isEmpty()) {
             return "op";
         }
@@ -61,7 +61,7 @@ final class JerseyNamingUtils {
     /**
      * Convert snake_case to camelCase
      */
-    static String toCamelCase(String snakeCase) {
+    public static String toCamelCase(String snakeCase) {
         if (snakeCase == null || snakeCase.isEmpty()) {
             return snakeCase;
         }
@@ -76,7 +76,7 @@ final class JerseyNamingUtils {
     /**
      * Capitalize first letter
      */
-    static String capitalize(String str) {
+    public static String capitalize(String str) {
         if (str == null || str.isEmpty()) {
             return str;
         }
@@ -87,7 +87,7 @@ final class JerseyNamingUtils {
      * Convert OpenAPI property name to a valid Java field name for model classes.
      * Prepends underscore if the camelCase form is a Java keyword (e.g. "case" -> "_case").
      */
-    static String toModelFieldName(String openApiPropertyName) {
+    public static String toModelFieldName(String openApiPropertyName) {
         String camel = toCamelCase(openApiPropertyName);
         return (camel != null && isJavaKeyword(camel)) ? "_" + camel : camel;
     }
@@ -96,7 +96,7 @@ final class JerseyNamingUtils {
      * Return the capitalized bean property name for getter/setter method names.
      * Strips leading underscore so getCase/setCase are used instead of get_Case/set_Case.
      */
-    static String getCapitalizedPropertyNameForAccessor(String javaFieldName) {
+    public static String getCapitalizedPropertyNameForAccessor(String javaFieldName) {
         if (javaFieldName == null || javaFieldName.isEmpty()) {
             return javaFieldName;
         }
@@ -107,7 +107,7 @@ final class JerseyNamingUtils {
     /**
      * Return the name to use in JAXB propOrder (bean property name without leading underscore).
      */
-    static String toPropOrderName(String javaFieldName) {
+    public static String toPropOrderName(String javaFieldName) {
         if (javaFieldName != null && javaFieldName.startsWith("_")) {
             return javaFieldName.substring(1);
         }
@@ -117,7 +117,7 @@ final class JerseyNamingUtils {
     /**
      * Sanitize parameter name to be a valid Java identifier
      */
-    static String sanitizeParameterName(String name) {
+    public static String sanitizeParameterName(String name) {
         if (name == null || name.isEmpty()) {
             return null;
         }
@@ -166,7 +166,7 @@ final class JerseyNamingUtils {
     /**
      * Sanitize a package name segment: lower-case, and prefix with underscore if it is a Java keyword.
      */
-    static String sanitizePackageName(String name) {
+    public static String sanitizePackageName(String name) {
         if (name == null || name.isEmpty()) {
             return null;
         }
@@ -182,7 +182,7 @@ final class JerseyNamingUtils {
     /**
      * Check if a string is a valid Java identifier
      */
-    static boolean isValidJavaIdentifier(String name) {
+    public static boolean isValidJavaIdentifier(String name) {
         if (name == null || name.isEmpty()) {
             return false;
         }
@@ -205,7 +205,7 @@ final class JerseyNamingUtils {
     /**
      * Check if a string is a Java keyword
      */
-    static boolean isJavaKeyword(String name) {
+    public static boolean isJavaKeyword(String name) {
         String[] keywords = {
                 "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char",
                 "class", "const", "continue", "default", "do", "double", "else", "enum",
@@ -227,7 +227,7 @@ final class JerseyNamingUtils {
     /**
      * Escape Java string for use in generated code
      */
-    static String escapeJavaString(String str) {
+    public static String escapeJavaString(String str) {
         return str.replace("\\", "\\\\")
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
@@ -240,7 +240,7 @@ final class JerseyNamingUtils {
      * Escapes only backslashes and double quotes for the Java string; parentheses are left as-is
      * so they remain regex grouping metacharacters (e.g. (\.\d{3})? for optional milliseconds).
      */
-    static String escapePatternForJavaStringLiteral(String pattern) {
+    public static String escapePatternForJavaStringLiteral(String pattern) {
         if (pattern == null) return "";
         StringBuilder sb = new StringBuilder();
         boolean afterBackslash = false;
@@ -263,7 +263,7 @@ final class JerseyNamingUtils {
     /**
      * Generate operationId from path and method if not provided
      */
-    static String generateOperationIdFromPath(String path, String method) {
+    public static String generateOperationIdFromPath(String path, String method) {
         // Clean path and convert to camelCase
         String cleanPath = path.replaceAll("[^a-zA-Z0-9]", "");
         if (cleanPath.isEmpty()) {

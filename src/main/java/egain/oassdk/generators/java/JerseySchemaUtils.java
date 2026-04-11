@@ -8,13 +8,13 @@ import java.util.*;
  * Pure stateless utility methods for OpenAPI schema inspection and resolution.
  * All methods are static and operate on raw schema maps.
  */
-final class JerseySchemaUtils {
+public final class JerseySchemaUtils {
 
     /** Max depth when resolving allOf/oneOf/anyOf to prevent infinite recursion */
-    static final int MAX_COMPOSITION_RESOLVE_DEPTH = 10;
+    public static final int MAX_COMPOSITION_RESOLVE_DEPTH = 10;
 
     /** Max recursion depth for mergeSchemaProperties to prevent StackOverflow on large specs. */
-    static final int MAX_MERGE_SCHEMA_DEPTH = 15;
+    public static final int MAX_MERGE_SCHEMA_DEPTH = 15;
 
     private JerseySchemaUtils() {
         // utility class - no instances
@@ -33,11 +33,11 @@ final class JerseySchemaUtils {
      * @param spec   the full OpenAPI spec (nullable); when non-null, $ref in composition are resolved
      * @return effective schema map, or the original schema if no composition or depth exceeded
      */
-    static Map<String, Object> resolveCompositionToEffectiveSchema(Map<String, Object> schema, Map<String, Object> spec) {
+    public static Map<String, Object> resolveCompositionToEffectiveSchema(Map<String, Object> schema, Map<String, Object> spec) {
         return resolveCompositionToEffectiveSchema(schema, spec, 0);
     }
 
-    static Map<String, Object> resolveCompositionToEffectiveSchema(Map<String, Object> schema, Map<String, Object> spec, int depth) {
+    public static Map<String, Object> resolveCompositionToEffectiveSchema(Map<String, Object> schema, Map<String, Object> spec, int depth) {
         if (schema == null || depth > MAX_COMPOSITION_RESOLVE_DEPTH) {
             return schema;
         }
@@ -94,7 +94,7 @@ final class JerseySchemaUtils {
     // ---------------------------------------------------------------------------
 
     /** Resolve $ref in a schema using spec (components/schemas). Returns resolved map or original if no ref/spec. */
-    static Map<String, Object> resolveRefInSchema(Map<String, Object> schema, Map<String, Object> spec) {
+    public static Map<String, Object> resolveRefInSchema(Map<String, Object> schema, Map<String, Object> spec) {
         if (schema == null || spec == null || !schema.containsKey("$ref")) {
             return schema;
         }
@@ -121,7 +121,7 @@ final class JerseySchemaUtils {
     // ---------------------------------------------------------------------------
 
     /** Merge one schema into the effective merged map (type, format, pattern, constraints, properties, required). */
-    static void mergeIntoEffectiveSchema(Map<String, Object> merged, Map<String, Object> from) {
+    public static void mergeIntoEffectiveSchema(Map<String, Object> merged, Map<String, Object> from) {
         if (from == null) return;
         for (String key : new String[]{"type", "format", "pattern", "minLength", "maxLength", "minItems", "maxItems", "enum", "writeOnly", "readOnly"}) {
             if (from.containsKey(key) && !merged.containsKey(key)) {
@@ -163,7 +163,7 @@ final class JerseySchemaUtils {
      * and constraints, but preserves {@code readOnly}/{@code writeOnly} from {@code earlier} when
      * {@code later} omits those keys and the earlier flag is true.
      */
-    static Map<String, Object> mergePropertyDefinitionsForComposition(Map<String, Object> earlier,
+    public static Map<String, Object> mergePropertyDefinitionsForComposition(Map<String, Object> earlier,
                                                                         Map<String, Object> later) {
         if (later == null || later.isEmpty()) {
             return earlier != null ? new LinkedHashMap<>(earlier) : new LinkedHashMap<>();
@@ -207,7 +207,7 @@ final class JerseySchemaUtils {
      * Merge a schema {@code properties} map into {@code allProperties}, deep-merging when a property
      * name already exists so readOnly/writeOnly overlays are not dropped.
      */
-    private static void mergePropertiesIntoAll(Map<String, Object> allProperties,
+    public static void mergePropertiesIntoAll(Map<String, Object> allProperties,
                                                Map<String, Object> properties) {
         if (properties == null) {
             return;
@@ -233,7 +233,7 @@ final class JerseySchemaUtils {
     /**
      * Merge schema properties into the allProperties map.
      */
-    static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
+    public static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
                                        List<String> allRequired, Map<String, Object> spec) {
         mergeSchemaProperties(schema, allProperties, allRequired, spec, new IdentityHashMap<>(), 0);
     }
@@ -241,7 +241,7 @@ final class JerseySchemaUtils {
     /**
      * Merge schema properties with cycle detection to prevent infinite recursion.
      */
-    static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
+    public static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
                                        List<String> allRequired, Map<String, Object> spec,
                                        Map<Object, Boolean> visited) {
         mergeSchemaProperties(schema, allProperties, allRequired, spec, visited, 0);
@@ -250,7 +250,7 @@ final class JerseySchemaUtils {
     /**
      * Merge schema properties with cycle detection and depth limit to prevent StackOverflow.
      */
-    static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
+    public static void mergeSchemaProperties(Map<String, Object> schema, Map<String, Object> allProperties,
                                        List<String> allRequired, Map<String, Object> spec,
                                        Map<Object, Boolean> visited, int depth) {
         if (schema == null) return;
@@ -404,7 +404,7 @@ final class JerseySchemaUtils {
     // ---------------------------------------------------------------------------
 
     /** Return true if the schema has the given key set to a truthy value (e.g. readOnly, writeOnly). */
-    static boolean isSchemaFlagTrue(Map<String, Object> schema, String key) {
+    public static boolean isSchemaFlagTrue(Map<String, Object> schema, String key) {
         if (schema == null || !schema.containsKey(key)) return false;
         Object v = schema.get(key);
         if (v instanceof Boolean) return Boolean.TRUE.equals(v);
@@ -415,7 +415,7 @@ final class JerseySchemaUtils {
     /**
      * Extract component schema name from x-resolved-ref or $ref (e.g. "#/components/schemas/UserView" -> "UserView").
      */
-    static String getSchemaNameFromRef(Map<String, Object> schema) {
+    public static String getSchemaNameFromRef(Map<String, Object> schema) {
         if (schema == null) return null;
         String ref = (String) schema.get("x-resolved-ref");
         if (ref == null) ref = (String) schema.get("$ref");
@@ -427,7 +427,7 @@ final class JerseySchemaUtils {
      * Derive schema name from external file $ref (e.g. "./User.yaml" or "models/v3/User.yaml" -> "User").
      * Used when array items have unresolved external $ref so we can resolve to List&lt;User&gt; if that schema exists.
      */
-    static String deriveSchemaNameFromExternalRef(String ref) {
+    public static String deriveSchemaNameFromExternalRef(String ref) {
         if (ref == null || ref.isEmpty()) return null;
         String path = ref.contains("#") ? ref.split("#", 2)[0] : ref;
         path = path.replace('\\', '/');
@@ -445,7 +445,7 @@ final class JerseySchemaUtils {
     // ---------------------------------------------------------------------------
 
     /** Holder for (innerPropertyName, itemTypeName) when schema is object with single array of ref. */
-    static final class ObjectWithSingleArrayInfo {
+    public static final class ObjectWithSingleArrayInfo {
         final String innerPropertyName;
         final String itemTypeName;
 
@@ -459,7 +459,7 @@ final class JerseySchemaUtils {
      * True if the schema is an object with exactly one property that is an array of a $ref.
      * Used to generate a wrapper inner class instead of flattening to List.
      */
-    static boolean isObjectWithSingleArrayOfRef(Map<String, Object> schema, Map<String, Object> spec) {
+    public static boolean isObjectWithSingleArrayOfRef(Map<String, Object> schema, Map<String, Object> spec) {
         return getObjectWithSingleArrayInfo(schema, spec) != null;
     }
 
@@ -467,7 +467,7 @@ final class JerseySchemaUtils {
      * If the schema is an object with exactly one property that is an array of a $ref,
      * return (innerPropertyName, itemTypeName) e.g. ("tagCategory", "TagCategory"). Otherwise null.
      */
-    static ObjectWithSingleArrayInfo getObjectWithSingleArrayInfo(Map<String, Object> schema, Map<String, Object> spec) {
+    public static ObjectWithSingleArrayInfo getObjectWithSingleArrayInfo(Map<String, Object> schema, Map<String, Object> spec) {
         if (schema == null || spec == null) return null;
         Map<String, Object> properties = Util.asStringObjectMap(schema.get("properties"));
         if (properties == null || properties.size() != 1) return null;
@@ -505,7 +505,7 @@ final class JerseySchemaUtils {
     /**
      * Inner class name for an object-with-single-array property (e.g. accessTags -> AccessTags).
      */
-    static String getWrapperClassName(String propertyName) {
+    public static String getWrapperClassName(String propertyName) {
         return JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName(propertyName));
     }
 
@@ -513,7 +513,7 @@ final class JerseySchemaUtils {
      * If the schema is an object with exactly one property that is an array of a $ref,
      * return the Java type as List&lt;ResolvedRefType&gt;. Otherwise return null.
      */
-    static String getListTypeForObjectWithSingleArrayOfRef(Map<String, Object> schema, Map<String, Object> spec) {
+    public static String getListTypeForObjectWithSingleArrayOfRef(Map<String, Object> schema, Map<String, Object> spec) {
         ObjectWithSingleArrayInfo info = getObjectWithSingleArrayInfo(schema, spec);
         return info == null ? null : "List<" + info.itemTypeName + ">";
     }
@@ -521,7 +521,7 @@ final class JerseySchemaUtils {
     /**
      * Check if a schema object references the given schema name.
      */
-    static boolean isSchemaReference(Map<String, Object> schema, String schemaName) {
+    public static boolean isSchemaReference(Map<String, Object> schema, String schemaName) {
         if (schema == null) return false;
         String ref = (String) schema.get("$ref");
         if (ref != null && ref.startsWith("#/components/schemas/")) {

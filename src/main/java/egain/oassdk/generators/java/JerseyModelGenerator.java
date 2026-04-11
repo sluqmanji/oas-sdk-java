@@ -162,7 +162,7 @@ class JerseyModelGenerator {
         }
 
         // Generate models for in-lined schemas
-        for (Map.Entry<Object, String> entry : ctx.inlinedSchemas.entrySet()) {
+        for (Map.Entry<Object, String> entry : ctx.getInlinedSchemas().entrySet()) {
             Object schemaObj = entry.getKey();
             String modelName = entry.getValue();
 
@@ -299,8 +299,8 @@ class JerseyModelGenerator {
         content.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
         content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
         content.append("import ").append(ctx.validationNs).append(".Valid;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".annotation.*;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".annotation.*;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".JAXBElement;\n");
         content.append("import javax.xml.namespace.QName;\n");
         content.append("import java.io.Serializable;\n");
         content.append("import java.util.Objects;\n");
@@ -1163,9 +1163,9 @@ class JerseyModelGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append(".model;\n\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlElementDecl;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlRegistry;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".JAXBElement;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".annotation.XmlElementDecl;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".annotation.XmlRegistry;\n");
         content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
 
@@ -1192,9 +1192,9 @@ class JerseyModelGenerator {
 
         StringBuilder content = new StringBuilder();
         content.append("package ").append(packagePath).append("." + JerseyNamingUtils.sanitizePackageName(generatedTopLevelClassName) + ";\n\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".JAXBElement;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlElementDecl;\n");
-        content.append("import ").append(ctx.xmlBindNs).append(".annotation.XmlRegistry;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".JAXBElement;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".annotation.XmlElementDecl;\n");
+        content.append("import ").append(ctx.getXmlBindNs()).append(".annotation.XmlRegistry;\n");
         content.append("import ").append(ctx.validationNs).append(".constraints.*;\n");
         content.append("import javax.xml.namespace.QName;\n\n");
 
@@ -1252,7 +1252,7 @@ class JerseyModelGenerator {
      */
     Set<String> collectJaxbModelClassNames(Set<String> generatedTopLevelClassNames) {
         Set<String> generatedClasses = new HashSet<>(generatedTopLevelClassNames);
-        generatedClasses.addAll(ctx.inlinedSchemas.values());
+        generatedClasses.addAll(ctx.getInlinedSchemas().values());
         return generatedClasses;
     }
 }

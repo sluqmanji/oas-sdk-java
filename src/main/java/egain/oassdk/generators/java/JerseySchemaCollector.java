@@ -7,10 +7,10 @@ import java.util.logging.Logger;
 
 /**
  * Collects and catalogs schemas referenced across an OpenAPI spec.
- * Populates the shared {@code ctx.inlinedSchemas} map and provides methods
+ * Populates the shared inlined-schemas map ({@link JerseyGenerationContext#getInlinedSchemas()}) and provides methods
  * for discovering which component schemas are actually referenced.
  */
-class JerseySchemaCollector {
+public final class JerseySchemaCollector {
 
     private static final Logger logger = egain.oassdk.core.logging.LoggerConfig.getLogger(JerseySchemaCollector.class);
 
@@ -19,7 +19,7 @@ class JerseySchemaCollector {
 
     private final JerseyGenerationContext ctx;
 
-    JerseySchemaCollector(JerseyGenerationContext ctx) {
+    public JerseySchemaCollector(JerseyGenerationContext ctx) {
         this.ctx = ctx;
     }
 
@@ -30,7 +30,7 @@ class JerseySchemaCollector {
     /**
      * Collect in-lined schemas from response bodies and assign names to them.
      */
-    void collectInlinedSchemas(Map<String, Object> spec) {
+    public void collectInlinedSchemas(Map<String, Object> spec) {
         Map<String, Object> paths = Util.asStringObjectMap(spec.get("paths"));
         if (paths == null) {
             return;
@@ -77,7 +77,7 @@ class JerseySchemaCollector {
                                                             String modelName = generateInlinedSchemaName(operationId, schema, schemaCounter++);
 
                                                             // Store the mapping
-                                                            ctx.inlinedSchemas.put(schemaObj, modelName);
+                                                            ctx.getInlinedSchemas().put(schemaObj, modelName);
                                                         }
                                                     }
                                                 }
@@ -202,9 +202,9 @@ class JerseySchemaCollector {
         // Skip if it's part of a composition (allOf/oneOf/anyOf) - those should be merged, not separate models
         String type = (String) schema.get("type");
         if ("object".equals(type) && schema.containsKey("properties") && !schema.containsKey("$ref") && !isInCompositionContext) {
-            if (!topLevelSchemaObjects.contains(schema) && !ctx.inlinedSchemas.containsKey(schema) && schema.containsKey("x-resolved-ref")) {
+            if (!topLevelSchemaObjects.contains(schema) && !ctx.getInlinedSchemas().containsKey(schema) && schema.containsKey("x-resolved-ref")) {
                 String modelName = generateInlineSchemaNameFromProperty(schema, parentPropertyName);
-                ctx.inlinedSchemas.put(schema, modelName);
+                ctx.getInlinedSchemas().put(schema, modelName);
             }
         }
 
@@ -259,7 +259,7 @@ class JerseySchemaCollector {
         }
 
         // Fallback to generic name
-        return "InlineObject" + ctx.inlinedSchemas.size();
+        return "InlineObject" + ctx.getInlinedSchemas().size();
     }
 
     /**
