@@ -102,7 +102,7 @@ class JerseyObservabilityGenerator {
                         return registry;
                     }
                 }
-                """, obsPackage, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
+                """, obsPackage, ctx.injectNs, ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs());
         writeFile(obsDir + "/MetricsFilter.java", metricsFilter);
 
         // --- TracingFilter.java ---
@@ -186,7 +186,7 @@ class JerseyObservabilityGenerator {
                         }
                     }
                 }
-                """, obsPackage, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
+                """, obsPackage, ctx.injectNs, ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs());
         writeFile(obsDir + "/TracingFilter.java", tracingFilter);
 
         // --- MetricsEndpoint.java ---
@@ -212,7 +212,7 @@ class JerseyObservabilityGenerator {
                         return metricsFilter.getRegistry().scrape();
                     }
                 }
-                """, obsPackage, ctx.injectNs, ctx.injectNs, ctx.wsNs, ctx.wsNs, ctx.wsNs);
+                """, obsPackage, ctx.injectNs, ctx.injectNs, ctx.getWsNs(), ctx.getWsNs(), ctx.getWsNs());
         writeFile(obsDir + "/MetricsEndpoint.java", metricsEndpoint);
 
         // --- ObservabilityBootstrap.java ---

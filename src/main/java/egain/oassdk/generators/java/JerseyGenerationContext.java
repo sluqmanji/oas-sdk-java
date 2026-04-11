@@ -17,7 +17,7 @@ import java.util.Map;
  * Encapsulates the spec, output directory, config, package name, and common utility methods
  * that are used across multiple generation phases.
  */
-class JerseyGenerationContext {
+public final class JerseyGenerationContext {
 
     final Map<String, Object> spec;
     final String outputDir;
@@ -34,7 +34,7 @@ class JerseyGenerationContext {
     final String injectNs;      // "javax.inject" or "jakarta.inject"
     final String servletNs;     // "javax.servlet" or "jakarta.servlet"
 
-    JerseyGenerationContext(Map<String, Object> spec, String outputDir, GeneratorConfig config, String packageName) {
+    public JerseyGenerationContext(Map<String, Object> spec, String outputDir, GeneratorConfig config, String packageName) {
         this.spec = spec;
         this.outputDir = outputDir;
         this.config = config;
@@ -51,9 +51,24 @@ class JerseyGenerationContext {
     }
 
     /**
+     * Mutable map of inlined anonymous schema objects to generated simple class names.
+     */
+    public Map<Object, String> getInlinedSchemas() {
+        return inlinedSchemas;
+    }
+
+    public String getXmlBindNs() {
+        return xmlBindNs;
+    }
+
+    public String getWsNs() {
+        return wsNs;
+    }
+
+    /**
      * Write content to a file, creating parent directories as needed.
      */
-    static void writeFile(String filePath, String content) throws IOException {
+    public static void writeFile(String filePath, String content) throws IOException {
         Path path = Paths.get(filePath);
         Path parent = path.getParent();
         if (parent != null) {
