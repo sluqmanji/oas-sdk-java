@@ -78,9 +78,11 @@ class JerseyModelGeneratorOneOfXorTest {
             assertTrue(content.contains(".isSetId()"), "Expected nested id checks to use isSetId() for string ids");
             assertFalse(content.contains("getId() != 0.0"),
                     "Must not emit double zero check when OpenAPI id is string");
-            assertTrue(content.contains("requiredMutuallyExclusiveFail()"));
-            assertTrue(content.contains("department.id must be set"));
-            assertTrue(content.contains("parent.id must be set"));
+            assertTrue(content.contains("isValidRequiredMutuallyExclusive()"));
+            assertTrue(content.contains("isValidDepartment()"));
+            assertTrue(content.contains("isValidParent()"));
+            assertTrue(content.contains("If department is set then department.id must be set"));
+            assertTrue(content.contains("If parent is set then parent.id must be set"));
         } finally {
             sdk.close();
         }

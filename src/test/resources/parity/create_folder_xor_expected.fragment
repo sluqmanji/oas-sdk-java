@@ -1,0 +1,20 @@
+    @XmlTransient
+    @Valid
+    @AssertTrue(message = "Either department or parent must be set")
+    public boolean isValidRequiredMutuallyExclusive() {
+        return (this.department != null) ^ (this.parent != null);
+    }
+
+    @XmlTransient
+    @Valid
+    @AssertTrue(message = "If department is set then department.id must be set")
+    public boolean isValidDepartment() {
+        return this.department == null || this.department.isSetId();
+    }
+
+    @XmlTransient
+    @Valid
+    @AssertTrue(message = "If parent is set then parent.id must be set")
+    public boolean isValidParent() {
+        return this.parent == null || this.parent.isSetId();
+    }

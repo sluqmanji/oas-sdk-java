@@ -1,0 +1,576 @@
+openapi: '3.0.0'
+info:
+  title: Folder Schema
+  version: 3.0.0
+servers:
+  - url: https://api.server.test/v1
+tags:
+  - name: dummy
+    description: dummy
+paths:
+  /test:
+    get:
+      operationId: placeHolder
+      tags:
+        - dummy
+      description: dummy
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+
+    BaseCollection:
+      type: object
+      properties:
+        link:
+          $ref: "../../../../models/v4/common.yaml#/components/schemas/Link"
+        paginationInfo:
+          $ref: "../../../../models/v4/common.yaml#/components/schemas/PaginationInfo"
+        count:
+          title: count
+          description: Count of total items
+          type: integer
+          minimum: 0
+          maximum: 25000
+
+    Folders:
+      allOf:
+        - $ref: '#/components/schemas/BaseCollection'
+        - type: object
+          properties:
+            folders:
+              type: array
+              items:
+                $ref: '#/components/schemas/Folder'
+
+    SubFolders:
+      allOf:
+        - $ref: '#/components/schemas/BaseCollection'
+        - type: object
+          properties:
+            folders:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubFolder'
+
+    # BASE SCHEMA: Source of truth for all folder properties
+    Folder:
+      type: "object"
+      title: "Folder"
+      properties:
+        id:
+          description: ID of folder
+          type: string
+          pattern: ^[1-9][0-9]{13}$
+          minLength: 14
+          maxLength: 14
+        name:
+          type: "string"
+          minLength: 1
+          maxLength: 250
+          pattern: '^(?!.*[~`$%^\\=;"{}])[\s\S]*\S[\s\S]*$'
+          description: Folder name
+        description:
+          type: string
+          minLength: 0
+          maxLength: 1024
+          pattern: '^[^~`%\^\\=;"''|&]*$'
+          description: Folder description
+        created:
+          allOf:
+            - readOnly: true
+              description: Created date and created by user.
+            - $ref: "../../../../models/v4/common.yaml#/components/schemas/DateAndUser"
+        lastModified:
+          allOf:
+            - description: Last modified date of current folder. 
+            - $ref: '../../../../models/v4/common.yaml#/components/schemas/DateAndUser'
+        parent:
+          allOf: 
+            - description: Parent folder of the folder
+            - $ref: "#/components/schemas/FolderSummary"
+        articles:
+          allOf:
+            - readOnly: true
+              description: Count of articles in folder.
+            - $ref: "#/components/schemas/ArticleSummary"
+        department:
+          allOf:
+            - description: Department that folder belongs to.
+            - $ref: "./AuthoringCommonObjects.yaml#/components/schemas/Department"
+        translateContent:
+          type: "boolean"
+          default: false
+          description: Articles in this folder to be considered for translation when the content is exported for translation
+        permissions:
+          allOf: 
+            - readOnly: true
+              description: The permissions given to folder for current user.
+            - $ref: './Permission.yaml#/components/schemas/FolderPermissions'
+        childFolderCount:
+          title: "childFolderCount"
+          type: "integer"
+          minimum: 0
+          maximum: 2500
+          readOnly: true
+        path:
+          title: "path"
+          type: "string"
+          description: 'Path of folder.'
+        isSystemCreated:
+          title: "isSystemCreated"
+          description: Indicates if folder was created by the system.
+          type: "boolean"
+          readOnly: true
+
+    SubFolder:
+      allOf:
+        - $ref: "#/components/schemas/FolderSummary"
+        - type: object
+          properties:
+            parentId: 
+              readOnly: true
+              description: ID of parent folder
+              type: string
+              pattern: ^[1-9][0-9]{13}$
+              minLength: 14
+              maxLength: 14
+
+    FolderSummary:
+        type: "object"
+        title: "Folder"
+        properties:
+          id:
+            readOnly: true
+            description: ID of folder
+            type: string
+            pattern: ^[1-9][0-9]{13}$
+            minLength: 14
+            maxLength: 14
+          name:
+            readOnly: true
+            type: "string"
+            minLength: 1
+            maxLength: 250
+            pattern: '^(?!.*[~`$%^\\=;"{}])[\s\S]*\S[\s\S]*$'
+            description: Folder name
+          link:
+            allOf: 
+              -  readOnly: true
+              -  $ref: "../../../../models/v4/common.yaml#/components/schemas/Link"
+          childFolderCount:
+            title: "childFolderCount"
+            type: "integer"
+            minimum: 0
+            maximum: 2500
+            readOnly: true
+
+    ArticleSummary:
+      title: Articles
+      type: object
+      properties: 
+        link:
+          $ref: "../../../../models/v4/common.yaml#/components/schemas/Link"
+        count:
+          type: integer
+
+    # DERIVED SCHEMA: Create operation
+    createFolder:
+      allOf:
+        - type: object
+          required:
+            - name
+          oneOf:
+            - title: Create a root-level folder
+              description: "Create a root-level folder in a department"
+              required: [department]
+              properties: 
+                department:
+                  type: object
+                  required: [id]
+                  properties:
+                    id:
+                      type: string
+                parent:
+                  readOnly: true
+            - title: Create a folder under parent 
+              description: "Create a subfolder under a parent"
+              required: [parent]
+              properties: 
+                department:
+                 readOnly: true
+                parent:
+                  type: object
+                  required: [id]
+                  properties:
+                    id:
+                      type: string
+                      readOnly: false
+                      writeOnly: true
+          properties: 
+            lastModified:
+              readOnly: true
+            id:
+              readOnly: true
+            path:
+              readOnly: true
+        - $ref: "#/components/schemas/Folder"
+
+    # DERIVED SCHEMA: Edit operation
+    editFolder:
+      allOf:
+        - type: object
+          required:
+            - lastModified
+            - language
+          properties: 
+            permissions:
+              allOf:
+                - description: Folder permissions to edit for users and groups
+                  readOnly: false
+                  writeOnly: true
+                  minItems: 1
+                  maxItems: 75
+                - $ref: "./Permission.yaml#/components/schemas/EditFolderPermissions"
+            lastModified:
+              properties:
+                user:
+                  readOnly: true
+            parent:
+              readOnly: true
+            id:
+              readOnly: true
+            department:
+              readOnly: true
+            path: # Moving path will be done with Move API
+              readOnly: true
+            language:
+              allOf:
+                - description: The language of the folder that is being edited.
+                - $ref: "../../../../models/v4/common.yaml#/components/schemas/LanguageForCreateUpdate"
+        - $ref: "#/components/schemas/Folder"
+
+    # DERIVED SCHEMA: Copy/Move operation - For Later Phase
+    copyOrMoveFolder:
+      allOf:
+        - type: object
+          required:
+            - parent
+            - language
+        - $ref: "#/components/schemas/Folder"
+
+  parameters:
+
+    folderIdPath:
+      name: folderID
+      in: path
+      description: ID of Folder
+      required: true
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]{13}$'
+        minLength: 14
+        maxLength: 14
+      example: '20150000000203'
+
+    folderIdPaths:
+      name: folderID
+      in: path
+      description: >-
+        One or more folder IDs, separated by commas. 
+        **Maximum of 75 folder IDs allowed.**
+      required: true
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]{13}(,[1-9][0-9]{13}){0,74}$'
+        example: '20150000000203,40960000000096'
+
+    filterParent:
+      name: filter[parent]
+      in: query
+      required: false
+      description: Parent folder for which sub folders are requested.
+      schema:
+        type: string
+        example: '40960000000096'
+        pattern: '^[1-9][0-9]{13}$'
+        minLength: 14
+        maxLength: 14
+
+    fetchChildrenCount:
+      name: fetchChildrenCount
+      in: query
+      description: Returns the count of child folders in each folder.
+      schema:
+        type: boolean
+      example: true
+
+    folderAdditionalAttributes:
+      name: folderAdditionalAttributes
+      in: query
+      required: false
+      schema:
+        type: array
+        items: 
+          type: string
+          enum: [ created, description, department, translateContent, permissions, articles ] 
+      description: | 
+        The attributes of a Folder to be returned *in addition to* the default list of attributes, listed below. Multiple additional attributes can be specified using a comma-separated list. Passing 'all' will return all attributes.
+        
+        #### Default Attributes
+        These Folder attributes are always returned:
+
+        | Name | Description 
+        | ---- | -----------
+        | id | The ID of the Folder.
+        | name | The name of the Folder.
+        | lastModified | The date and user that last modified the Folder.
+        | parent | Information about the parent folder (ID, name, and path).
+        | path | The absolute breadcrumb path of the folder.
+        | isSystemCreated | Indicates if this folder was created by the system.
+      style: form
+      explode: false
+      examples:
+        Single:
+          value: [description]
+          description: An additional attribute to be returned.
+        Multiple:
+          value: [description,permissions]
+          description: Additional attributes to be returned.
+
+    levelParam:
+      name: $level
+      in: query
+      required: false
+      description: | 
+        Depth of the level of folder hierarchy.
+
+        **Max depth in a request: 20**
+
+        - **0** - This denotes only the root level
+        - **1-20** - This denotes hierarchy up to any other positive integer value level from root level
+
+        If **$level** is provided outside of 0, primary sort will be on depth first followed by **$sort** query.
+      schema:
+        type: integer
+        example: 0
+        minimum: 0
+        maximum: 20
+
+    sortParam:
+      name: $sort
+      in: query
+      required: false
+      description: Attribute on which result list will be sorted.
+      schema:
+        type: string
+        example: "name"
+        default: id
+        enum: [ id, name, description, created, lastModified]
+
+    deleteIfUsedInPortal:
+      name: deleteIfUsedInPortal
+      in: query
+      description: Explicit request to delete specified folders even if some linked topics are used in a portal(s). If this parameter is absent and any of the topics linked to folders specified in the URI are used in a portal(s), the server will return '412 - Precondition Failed'.
+      schema:
+        type: boolean
+      example: true
+
+    deleteUnreferencedArticles:
+      name: deleteUnreferencedArticles
+      in: query
+      required: false
+      description: The system will delete all articles within the folder that are not currently in use or referenced elsewhere (e.g., articles that are not targets of links, macros, or active cases) asynchronously in the background.
+      schema:
+        type: boolean
+      example: true
+
+  requestBodies:
+    createFolder:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/createFolder'
+          examples:
+            New Subfolder:
+              summary: Create a subfolder
+              value:
+                name: "2024 Q4 Budget Planning"
+                description: "Confidential financial planning for Q4."
+                parent:
+                  id: "20240000000100"
+                translateContent: false
+
+    editFolder:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/editFolder'
+          examples:
+            Revoke Access:
+              summary: Update metadata and remove 'delete' permission from a user.
+              value:
+                lastModified:
+                  date: "2024-08-14T09:00:00.000Z"
+                name: "Public Company Policy"
+                description: "Updated description for public consumption."
+                language: { code: en-US }
+                permissions:
+                  - identity:
+                      user:
+                        id: "1005"
+                    permission:
+                      - value: "delete_folder"
+                        isAssigned: false
+                        toPropagate: false
+
+  responses:
+    ReadFoldersResponse:
+      description: Success
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Folders"
+          examples:
+            Summary Attributes:
+              summary: Default attributes returned when no additional attributes are requested.
+              value:
+                link:
+                  rel: 'self'
+                  href: '/knowledge/contentmgr/v4/folders/20240000000123'
+                paginationInfo:
+                  count: 1
+                  pagenum: 1
+                  pagesize: 10
+                count: 1
+                folders:
+                  - id: "20240000000123"
+                    name: "IT Infrastructure"
+                    path: "Departments\\Service\\Operations\\IT Infrastructure"
+                    lastModified:
+                      date: "2024-08-10T14:30:00.000Z"
+                      user:
+                        id: "1005"
+                        firstName: "Jane"
+                        lastName: "Doe"
+                        link:
+                          rel: "self"
+                          href: "/core/usermgr/v4/users/1005"
+                    parent:
+                      id: "20240000000122"
+                      name: Operations
+                      link:
+                        rel: "self"
+                        href: "/knowledge/contentmgr/v4/folders/20240000000122&fetchChildrenCount=true"
+                      childFolderCount: 1
+                    childFolderCount: 2
+            Additional Attributes:
+              summary: Additional attribute permissions is requested.
+              value:
+                link:
+                  rel: 'self'
+                  href: '/knowledge/contentmgr/v4/folders/20240000000123?folderAdditionalAttributes=permissions&fetchChildrenCount=true'
+                paginationInfo:
+                  count: 1
+                  pagenum: 1
+                  pagesize: 10
+                count: 1
+                folders:
+                  - id: "20240000000123"
+                    name: "IT Infrastructure"
+                    path: "Departments\\Service\\Operations\\IT Infrastructure"
+                    lastModified:
+                      date: "2024-08-10T14:30:00.000Z"
+                      user:
+                        id: "1005"
+                        firstName: "Jane"
+                        lastName: "Doe"
+                        link:
+                          rel: "self"
+                          href: "/core/usermgr/v4/users/1005"
+                    parent:
+                      id: "20240000000122"
+                      name: Operations
+                      link:
+                        rel: "self"
+                        href: "/knowledge/contentmgr/v4/folders/20240000000122"
+                      childFolderCount: 1
+                    permissions:
+                      - identity:
+                          user:
+                            id: "200"
+                            firstName: "Alex"
+                            lastName: "Smith"
+                        permissions:
+                          - { value: "own_folder", isExplicit: true, isAssigned: true }
+                          - { value: "view_folder", isExplicit: true, isAssigned: true }
+                          - { value: "create_folder", isExplicit: true, isAssigned: true }
+                          - { value: "delete_folder", isExplicit: true, isAssigned: true }
+                          - { value: "edit_folder", isExplicit: true, isAssigned: true }
+                          - { value: "create_article", isExplicit: true, isAssigned: true }
+                          - { value: "edit_article", isExplicit: true, isAssigned: true }
+                          - { value: "delete_article", isExplicit: true, isAssigned: true }
+                          - { value: "suggest_article", isExplicit: true, isAssigned: true }
+                          - { value: "manage_suggestions", isExplicit: true, isAssigned: true }
+                          - { value: "own", isExplicit: true, isAssigned: true }
+                          - { value: "view", isExplicit: true, isAssigned: true }
+                          - { value: "create", isExplicit: true, isAssigned: true }
+                          - { value: "delete", isExplicit: true, isAssigned: true }
+                          - { value: "edit", isExplicit: true, isAssigned: true }
+                    childFolderCount: 2
+
+    GetSubFoldersResponse:
+      description: Success
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SubFolders"
+          example:
+              summary: Results for a sub folder query.
+              value:
+                link:
+                  rel: 'self'
+                  href: '/knowledge/contentmgr/v4/folders?filter[parent]=20240000000123&&fetchChildrenCount=true'
+                paginationInfo:
+                  count: 1
+                  pagenum: 1
+                  pagesize: 25
+                count: 2
+                folders:
+                  - id: "20240000000888"
+                    parentId: "20240000000123"
+                    name: "Security Protocols"
+                    childFolderCount: 0
+                    link:
+                      rel: "self"
+                      href: "/knowledge/contentmgr/v4/folders/20240000000888"
+                  - id: "20240000000889"
+                    parentId: "20240000000123"
+                    name: "Security Procedures"
+                    childFolderCount: 0
+                    link:
+                      rel: "self"
+                      href: "/knowledge/contentmgr/v4/folders/20240000000889"
+
+    # CopyOrMoveBadRequestResponse:
+    #   description: Bad Request
+    #   content:
+    #     application/json:
+    #       schema:
+    #         $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+    #       examples:
+    #         Missing Request Body:
+    #           value:
+    #             code: 400-264
+    #             developerMessage: Request body is mandatory. Please provide body for the request.
+    #         Non Existent value passed in request body:
+    #           value:
+    #             code: 400-194
+    #             developerMessage: 'The following IDs supplied in the request body were not found: 409600000033'
+    #         Invalid Query Parameter:
+    #           value:
+    #             code: 400-244
+    #             developerMessage: 'Invalid value provided for query parameter: merge'

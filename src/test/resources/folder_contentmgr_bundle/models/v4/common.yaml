@@ -1,0 +1,41 @@
+openapi: 3.0.0
+info:
+  title: stub common for Folder bundle tests
+  version: '1'
+paths: {}
+components:
+  schemas:
+    Link:
+      type: object
+      properties:
+        href:
+          type: string
+        rel:
+          type: string
+    PaginationInfo:
+      type: object
+      properties:
+        count:
+          type: integer
+    DateAndUser:
+      type: object
+      properties:
+        date:
+          type: string
+        user:
+          type: string
+    WSErrorCommon:
+      type: object
+      properties:
+        code:
+          type: string
+    WSErrorLegacy:
+      type: object
+      properties:
+        code:
+          type: string
+    LanguageForCreateUpdate:
+      type: object
+      properties:
+        code:
+          type: string
