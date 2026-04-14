@@ -1,0 +1,219 @@
+openapi: '3.0.0'
+info:
+  title: Schema
+  version: '3.0'
+servers:
+  - url: https://api.server.test/v1
+tags:
+  - name: dummy
+    description: dummy
+paths:
+  /test:
+    get:
+      operationId: placeHolder
+      tags:
+        - dummy
+      description: dummy
+      responses:
+        '200':
+          description: OK
+          
+components:
+  schemas:
+
+    # ==========================================
+    # 1. ROOT PAYLOADS
+    # ==========================================
+    
+    # Folder Permission for current user, only show current user/ no user group. Field should not be returned if current user has full permissions.
+    FolderPermissions:
+      title: permissions
+      type: array 
+      description: An array of permission entries. Each entry defines the permissions granted to a specific user or group.
+      items:
+        $ref: '#/components/schemas/FolderPermissionsEntry'
+
+    # CreateFolderPermissions:
+    #   type: array
+    #   items:
+    #     $ref: '#/components/schemas/CreateFolderPermissionsEntriesWrapper'
+
+    EditFolderPermissions:
+      title: permissions
+      type: array 
+      description: An array of permission entries. Each entry defines the permissions granted to a specific user or group.
+      items:
+        $ref: '#/components/schemas/EditFolderPermissionsEntry'
+
+
+    # ==========================================
+    # 2. WRAPPERS (With Descriptions fixed!)
+    # ==========================================
+
+    # CreateFolderPermissionsEntriesWrapper:
+    #   type: object
+    #   required: [entries]
+    #   properties:
+    #     entries:
+    #       type: array 
+    #       description: An array of permission entries to assign. Each entry targets a specific user or group.
+    #       items:
+    #         $ref: '#/components/schemas/CreateFolderPermissionsEntry'
+
+    # EditFolderPermissionsEntriesWrapper:
+    #   type: object
+    #   required: [entries]
+    #   properties: 
+    #     permissions:
+    #       type: array 
+    #       minItems: 1
+    #       maxItems: 75
+    #       description: An array of permission entries to update or add. Each entry targets a specific user or group. A maximum of 75 permission entries can be updated or added at a time.
+    #       items:
+    #         $ref: '#/components/schemas/EditFolderPermissionsEntry'
+
+
+    # ==========================================
+    # 3. ENTRY OBJECTS (The New Flat Structure)
+    # ==========================================
+
+    FolderPermissionsEntry:
+      type: object
+      required: 
+        - permission
+      properties:
+        permission:
+          type: array
+          description: Array of permission assigned to identity
+          minItems: 1
+          maxItems: 15
+          items:
+            $ref: '#/components/schemas/FolderPermissionDetail'
+
+    # CreateFolderPermissionsEntry:
+    #   type: object
+    #   required: 
+    #     - identity
+    #     - permissions
+    #   properties:
+    #     identity:
+    #       $ref: '#/components/schemas/IdentityPayload'
+    #     permissions:
+    #       type: array
+    #       description: Array of permission being assigned to identity
+    #       items:
+    #         $ref: '#/components/schemas/CreateFolderPermissionDetails'
+
+    EditFolderPermissionsEntry:
+      type: object
+      required: 
+        - identity
+        - permission
+      properties:
+        identity:
+          $ref: '#/components/schemas/IdentityPayload'
+        permission:
+          type: array
+          description: Array of permission being assigned to identity
+          minItems: 1
+          maxItems: 15
+          items:
+            $ref: '#/components/schemas/EditFolderPermissionDetails'
+
+
+    # ==========================================
+    # 4. POLYMORPHIC IDENTITY (The Clean oneOf)
+    # ==========================================
+
+    IdentityPayload:
+      description: "The subject receiving the permissions. Must be either a User or a Group."
+      oneOf:
+        - title: User
+          type: object
+          required: [user]
+          properties:
+            user:
+              $ref: '#/components/schemas/Identity'
+        - title: Group
+          type: object
+          required: [group]
+          properties:
+            group:
+              $ref: '#/components/schemas/GroupIdentity'
+
+
+    # ==========================================
+    # 5. PERMISSION DETAILS & IDENTITIES
+    # ==========================================
+
+    # CreateFolderPermissionDetails:
+    #   allOf: 
+    #     - properties:
+    #         isExplicit:
+    #           readOnly: true
+    #         isAssigned:
+    #           writeOnly: false
+    #           readOnly: true
+    #     - $ref: "#/components/schemas/FolderPermissionDetail"
+
+    EditFolderPermissionDetails:
+      allOf: 
+        - properties:
+            isExplicit:
+              readOnly: true
+        - $ref: "#/components/schemas/FolderPermissionDetail"
+      
+    FolderPermissionDetail:
+      type: object
+      properties:
+        isExplicit:
+          type: boolean
+          description: Indicates if permission was granted explicitly
+        value:
+          type: string
+          description: Permission for operation
+          enum:
+            - own_folder
+            - view_folder
+            - create_folder
+            - delete_folder
+            - edit_folder
+            - create_article
+            - edit_article
+            - delete_article
+            - suggest_article
+            - manage_suggestions
+            - own
+            - view
+            - create
+            - delete
+            - edit
+        isAssigned:
+          type: boolean
+          description: Indicates if this permission is assigned. Set this to false to remove permission.
+        toPropagate:
+          type: boolean
+          writeOnly: true
+          description: Set to true to propagate this permission to all children folders.
+
+    Identity:
+      title: User Identity
+      description: The user assigned permissions
+      required: [id]
+      allOf: 
+        - properties: 
+            id: 
+              type: string
+              readOnly: false
+        - $ref: "../../../../models/v4/User.yaml#/components/schemas/BasicUser"
+    
+    GroupIdentity:
+      title: Group Identity
+      description: The group assigned permissions
+      required: [id]
+      allOf: 
+        - properties: 
+            id: 
+              type: string
+              readOnly: false
+        - $ref: "../../../../models/v4/Group.yaml#/components/schemas/BasicGroup"

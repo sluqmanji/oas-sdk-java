@@ -362,8 +362,9 @@ class JerseyModelGenerator {
                 String xorJava1 = JerseyNamingUtils.toModelFieldName(xorJson1);
                 String xorMessage = "Either " + xorJson0 + " or " + xorJson1 + " must be set";
                 oneOfXorAssertBlock.append("    @XmlTransient\n");
+                oneOfXorAssertBlock.append("    @Valid\n");
                 oneOfXorAssertBlock.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(xorMessage)).append("\")\n");
-                oneOfXorAssertBlock.append("    public boolean requiredMutuallyExclusiveFail() {\n");
+                oneOfXorAssertBlock.append("    public boolean isValidRequiredMutuallyExclusive() {\n");
                 oneOfXorAssertBlock.append("        return (this.").append(xorJava0).append(" != null) ^ (this.").append(xorJava1).append(" != null);\n");
                 oneOfXorAssertBlock.append("    }\n\n");
                 appendOneOfXorNestedIdAssertTrue(oneOfXorAssertBlock, oneOfXorInfo.sortedJson0(), oneOfXorInfo.nestedIdRequiredForSorted0(),
@@ -759,10 +760,11 @@ class JerseyModelGenerator {
         String methodCap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(javaField);
         String msg = legacyXorNestedIdAsserts
                 ? xorJsonName + ".id must be set when " + xorJsonName + " attribute is set"
-                : xorJsonName + ".id must be set";
+                : "If " + xorJsonName + " is set then " + xorJsonName + ".id must be set";
         content.append("    @XmlTransient\n");
+        content.append("    @Valid\n");
         content.append("    @AssertTrue(message = \"").append(JerseyNamingUtils.escapeJavaString(msg)).append("\")\n");
-        content.append("    public boolean required").append(methodCap).append("IdMissing() {\n");
+        content.append("    public boolean isValid").append(methodCap).append("() {\n");
         content.append("        return ").append(returnClause).append(";\n");
         content.append("    }\n\n");
     }

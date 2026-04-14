@@ -48,9 +48,9 @@ public class GeneratorConfig {
     private boolean jsonOnlyResourceMediaTypes;
 
     /**
-     * When true, simple two-branch {@code oneOf} XOR models emit legacy-style nested {@code id} {@code @AssertTrue}
-     * methods and messages (e.g. eGain bindings parity). When false (default), predicates follow OpenAPI {@code id}
-     * type and standard Bean Validation semantics.
+     * When true, simple two-branch {@code oneOf} XOR models use legacy nested-{@code id} predicates and longer
+     * messages; method names stay {@code isValid*} in both modes. When false (default), predicates follow OpenAPI
+     * {@code id} type and standard Bean Validation semantics with conditional messages.
      */
     private boolean legacyXorNestedIdAsserts;
 

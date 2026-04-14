@@ -1,0 +1,454 @@
+openapi: '3.0.2'
+info:
+  title: API Title
+  version: '1.0'
+servers:
+  - url: https://api.server.test/v1
+tags:
+  - name : dummy
+    description: dummy
+paths:
+  /test:
+    get:
+      operationId: placeHolder
+      tags:
+        - dummy
+      description: dummy
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    Department:
+      type: object
+      description: Department of the folder
+      title: Department
+      properties:
+        id:
+          type: string
+          description: The ID of the department.
+        name:
+          type: string
+          pattern: ^[a-zA-Z0-9_-]+$
+          minLength: 1
+          maxLength: 255
+          description: The name of the department.
+          readOnly: true
+  responses:
+    401_invalid_authorization:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            Invalid Authorization:
+              $ref: '#/components/examples/Invalid_Authorization'
+    403_scope_not_assigned:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            'Required Scope Missing':
+              $ref: '#/components/examples/Scope_Not_Assigned'
+    404_common_not_found:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            'Resource Not Found':
+              $ref: '#/components/examples/Resource_Not_Found'
+    405_method_not_allowed:
+      description: Method not allowed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            Method Not Allowed:
+              $ref: '#/components/examples/method_not_allowed'
+    400_common_bad_request:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            Required Attribute missing:
+              $ref: '#/components/examples/Required_Attribute_Missing'
+            Unallowed attribute value:
+              $ref: '#/components/examples/Unallowed_Attribute_Value'
+    409_conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            last modified date mismatch:
+              $ref: '#/components/examples/last_modified_date_mismatch'
+    412_precondition_failed:
+      description: Preconditions failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples:
+            precondition failed:
+              $ref: '#/components/examples/precondition_failed'
+    412_Article:
+      description: Preconditions failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorLegacy'
+          examples:
+            Last modified date mismatch:
+              $ref: '#/components/examples/412_last_modified_date_mismatch_article'
+            Article Is Not Checked Out Yet:
+              $ref: '#/components/examples/412_precondition_failed_article_is_not_checked_out'
+    400_Article:
+      description: Preconditions failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorLegacy'
+          example:
+              message: 'Common Bad Request Message.'
+
+    412_precondition_failed_article_is_not_checked_out:
+      description: Preconditions failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorLegacy'
+          examples:
+            precondition failed:
+              $ref: '#/components/examples/412_precondition_failed_article_is_not_checked_out'
+    412_precondition_failed_article_already_checked_out:
+      description: Preconditions failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorLegacy'
+          examples:
+            precondition failed:
+              $ref: '#/components/examples/412_precondition_failed_article_already_checked_out'
+    NotAcceptable:
+      description: Not acceptable
+      content:
+        application/json:
+          schema:
+            $ref: "../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon"
+          examples:
+            Not Acceptable:
+              $ref: "#/components/examples/NotAcceptable"
+    TooManyRequest:
+      description: Too Many Request
+      content:
+        application/json:
+          schema:
+            $ref: '../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon'
+          examples: 
+            Too Many Request:
+              $ref: '#/components/examples/Too_Many_Request'
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "../../../../models/v4/common.yaml#/components/schemas/WSErrorCommon"
+          examples:
+            Internal Server Error:
+              $ref: "#/components/examples/InternalServerError"
+  examples:
+    Too_Many_Request:
+      description: |
+        Too many requests. Try again at a later time.
+      value:
+        code: 429-001
+        developerMessage: 'Too many requests.'
+    Invalid_Authorization:
+      description: |
+        Invalid or expired Authorization. Generate new Authorization header and try again.
+      value:
+        code: 401-104
+        developerMessage: 'Invalid or missing ''Authorization'' header value.'
+    Scope_Not_Assigned:
+      description: |
+        User doesn't have required scope to call this API. Refer API description to know which scope needs to be assigned to user.
+      value:
+        code: 403-197
+        developerMessage: 'Not authorized to perform the action.'
+    Required_Attribute_Missing:
+      description: Required query parameter is missing
+      value:
+        code: 400-112
+        developerMessage: 'Required query parameter(s) is missing. The following parameters are required: <param name>'
+    Unknown_Attribute_Present:
+      description: Unknown attribute present in request body
+      value:
+        code: 400-420
+        developerMessage: '<attribute>: is not defined in the schema and the schema does not allow additional properties'
+    Duplicate_Resource_Found:
+      description: Resouce with same details found
+      value:
+        code: 400-138
+        developerMessage: 'Duplicate resource present in request body: <duplicate_value>'
+    Unallowed_Attribute_Value:
+      description: One of the attribute has value which is not allowed
+      value:
+        code: 400-196
+        developerMessage: 'Invalid value of attribute <attrbiute>, expected values are: [<possible_values>].'
+    Resource_Not_Found:
+      description: Resource not found
+      value:
+        code: 404-101
+        developerMessage: 'The following id does not exist: <id>'
+    method_not_allowed:
+      description: Method not allowed
+      value:
+        code: 405-100
+        developerMessage: 'Method not allowed.'
+    last_modified_date_mismatch:
+      value:
+        code: 409-100
+        developerMessage: 'Last modified date provided in the request body for the following <resource> do not match: <resource_id>.'
+    412_last_modified_date_mismatch_article:
+      value:
+        message: 'Precondition failed on resource. Last Modified Date did not match the one in Database'
+
+    NotAcceptable:
+      value:
+        code: 406-100
+        developerMessage: Invalid 'Accept-Language' header value provided.
+    precondition_failed:
+      value:
+        code: 412-100
+        developerMessage: Pre condition failed
+    InternalServerError:
+      value:
+        code: 500-100
+        developerMessage: System is unable to process this request. Please contact your administrator.
+    412_precondition_failed_article_already_checked_out:
+      value:
+        code: 412
+        message: 'Precondition failed on resource. condition=article_{959500000077494}_already_checkedout.'
+    412_precondition_failed_article_is_not_checked_out:
+      value:
+        code: 412
+        message: 'Precondition failed on resource. article 959500000037700 is not checked out.'
+  parameters:
+    language:
+      name: $lang
+      in: query
+      description: The knowledge base language used for retrieving the response. This must be a language that is made available to the user. If this parameter is not passed, then the default language of the system is used.
+      required: false
+      schema:
+        type: string
+        enum: [en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR]
+        example: en-US
+    pagenum:
+      name: "$pagenum"
+      in: query
+      description: 'Pagination parameter that specifies the page number of results to be returned. Used in conjunction with $pagesize.'
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 999
+        default: 1
+    pagesize:
+      name: "$pagesize"
+      in: query
+      description: 'Pagination parameter that specifies the number of results per page. Used in conjunction with $pagenum.'
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 75
+        default: 10
+    rangestart:
+      name: "$rangestart"
+      in: query
+      description: 'Range parameter that specifies the starting index of the range of results to be returned. Used in conjunction with $rangesize.<br>_Default value_: 1'
+      required: false
+      schema:
+        type: string
+    rangesize:
+      name: "$rangesize"
+      in: query
+      description: 'Range parameter that specifies the number (range) of results to be returned. Used in conjunction with $rangestart.<br>_Default value_: 10'
+      required: false
+      schema:
+        type: string
+    mandatoryLanguage:
+      name: $lang
+      in: query
+      description: The knowledge base language used for retrieving response. Must be a language enabled in the system.
+      required: true
+      schema:
+        type: string
+        enum: [ en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR ]
+    optionalLanguage:
+      name: $lang
+      in: query
+      description: The knowledge base language used for retrieving response. Must be a language enabled in the system.
+      required: false
+      schema:
+        type: string
+        enum: [ en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR ]
+    order:
+      name: "$order"
+      in: query
+      description: Common query parameter $order.
+      required: false
+      schema:
+        type: string
+        enum:
+          - asc
+          - desc
+        example: asc
+    mandatoryLanguageCodeParameter:
+      name: languageCode
+      in: query
+      description: The knowledge base language used for retrieving response. Must be a language enabled in the system.
+      required: true
+      schema:
+        type: string
+        enum: [ en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR ]
+        example: en-US
+    mandatoryDepartmentNameParameter:
+      name: department
+      in: query
+      description: The department name.
+      required: true
+      schema:
+        type: string
+        example: Service
+    filterName:
+      name: filter[name]
+      description: Attribute to filter the result based on name.
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 250
+        pattern: '^(?!.*[~`$%^\\=;"{}])[\s\S]*\S[\s\S]*$'
+        example: folder1
+    filterDescription:
+      name: filter[description]
+      description: Attribute to filter the result based on description.
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 0
+        maxLength: 1024
+        pattern: '^[^~`%\^\\=;"''|&]*$'
+        example: This is folder
+    filterCreated:
+      name: filter[created]
+      description: Attribute to filter the result based on created by user/system.
+      in: query
+      required: false
+      schema:
+        type: string
+        pattern: ^[\w\-&@. ]*[\w\-&@.][\w\-&@. ]*$
+        minLength: 1
+        maxLength: 255
+        example: user
+    departmentId:
+      name: departmentId
+      description: The ID of the department
+      in: query
+      required: false
+      schema:
+        type: number
+        minimum: 999
+        maximum: 999999999
+        example: 999
+    mandatoryDepartmentId:
+      name: departmentId
+      description: The ID of the department.
+      in: query
+      required: true
+      schema:
+        type: number
+        minimum: 999
+        maximum: 999999999
+        example: 999
+    articleId:
+      name: ID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The ID of the article for which the operation is performed. Both numeric and alternate ID formats are supported.
+      examples:
+        Readable Id:
+          value: 'PROD-2268'
+          description: A readable article ID.
+        Numeric Id:
+          value: '202200000002268'
+          description: A numeric article ID.
+    articleIds:
+      name: ID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The comma separated Ids of the articles on which operation is performed. Both numeric and alternate Ids formats are supported for article Id.
+      examples:
+        Readable Id:
+          value: 'PROD-2268,PROD-2269'
+          description: Providing readable article ids.
+        Numeric Id:
+          value: '202200000002268,202200000002269'
+          description: Providing numeric article ids.
+    numericArticleIds:
+      name: ID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The comma separated Ids of the articles on which operation is performed. Numeric Id format is supported for article Id.
+      examples:
+        Numeric Id:
+          value: '202200000002268,202200000002269'
+          description: Providing numeric article ids.
+    kbLanguage:
+      name: $lang
+      in: query
+      description: The knowledge base language used for retrieving response. Must be a language enabled in the system.
+      required: true
+      schema:
+        type: string
+        enum: [ en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR ]
+        example: en-US
+    kbLanguageOptional:
+      name: $lang
+      in: query
+      description: The knowledge base language used for retrieving response. Must be a language enabled in the system.
+      required: false
+      schema:
+        type: string
+        enum: [ en-US, en-GB, fr-FR, es-ES , it-IT, de-DE,nl-NL,pt-BR,pt-PT,da-DK,sv-SE,ru-RU,fr-CA,zh-CN,ja-JP,ko-KR ]
+        example: en-US
+    topicId:
+        name: ID
+        in: path
+        description: Topic ID
+        required: true
+        schema:
+          type: string
+        examples:
+          Topic Id:
+            value: '202200000002268'
