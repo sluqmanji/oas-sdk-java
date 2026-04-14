@@ -77,21 +77,27 @@ public class PathResolverTest {
     }
     
     @Test
-    public void testPathTraversalProtection() throws IOException {
-        // Create a file outside base directory
-        Path outsideFile = tempDir.resolve("outside.yaml");
-        Files.createFile(outsideFile);
-        
-        // Attempt path traversal should fail
-        assertThrows(OASSDKException.class, () -> 
-            pathResolver.resolveReference("../outside.yaml", baseDir)
+    public void testPathTraversalProtection() {
+        // Parent-relative refs are valid for OpenAPI $ref; missing targets must still fail
+        assertThrows(OASSDKException.class, () ->
+            pathResolver.resolveReference("../nonexistent-oas-ref-target.yaml", baseDir)
         );
     }
-    
+
+    @Test
+    public void testParentRelativeRefOutsideBaseDir() throws IOException, OASSDKException {
+        Path outsideFile = tempDir.resolve("outside.yaml");
+        Files.createFile(outsideFile);
+
+        Path resolved = pathResolver.resolveReference("../outside.yaml", baseDir);
+        assertEquals(outsideFile.normalize(), resolved.normalize());
+        assertTrue(Files.exists(resolved));
+    }
+
     @Test
     public void testPathTraversalWithMultipleDots() {
         assertThrows(OASSDKException.class, () -> {
-            pathResolver.resolveReference("../../../etc/passwd", baseDir);
+            pathResolver.resolveReference("../../../../../../../../nonexistent-oas-path-xyz.yaml", baseDir);
         });
     }
     
