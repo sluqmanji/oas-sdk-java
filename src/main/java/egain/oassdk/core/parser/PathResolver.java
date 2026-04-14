@@ -187,8 +187,12 @@ public class PathResolver {
                 validationBase = searchPaths.get(0);
             }
             try {
-                validatePathTraversal(validationBase, resolvedPath);
-                // Validate file size
+                // OpenAPI $ref resolves relative to the containing file; paths with ".." may legitimately
+                // target files outside the referencing directory (e.g. ../../../../models/v4/common.yaml).
+                // When we collapsed ".." against baseDir via resolveRelativePathString, accept the result.
+                if (resolvedPathStr == null) {
+                    validatePathTraversal(validationBase, resolvedPath);
+                }
                 validateFileSize(resolvedPath);
                 return resolvedPath;
             } catch (OASSDKException e) {
