@@ -117,7 +117,9 @@ public class RegressionTest {
             } else if (isSchemaOrFragmentOnly(e.getMessage())) {
                 // Schema/fragment YAMLs (e.g. Alias.yaml, DepartmentView.yaml) are not root OpenAPI specs
                 return;
-            } else if (e.getMessage() != null && e.getMessage().contains("Reference not found")) {
+            } else if (e.getMessage() != null
+                    && (e.getMessage().contains("Reference not found")
+                        || e.getMessage().contains("Referenced file not found"))) {
                 // Some test YAML files may have incomplete references
                 // This is acceptable for regression testing - we're mainly checking for StackOverflowError
                 // Log the issue but don't fail the test
