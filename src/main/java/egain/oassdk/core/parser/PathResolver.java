@@ -460,7 +460,16 @@ public class PathResolver {
         }
         String base = basePathStr.replace('\\', '/').trim();
         String rel = relativePath.replace('\\', '/').trim();
+        // Unix absolute path: strip one leading "/" for segment parsing, then prepend "/" to the result.
+        // Do not treat UNC (//server/share/...) as Unix-rooted; it needs different prefix handling.
+        boolean unixAbsoluteRoot = base.startsWith("/") && !base.startsWith("//");
+        if (unixAbsoluteRoot) {
+            base = base.length() == 1 ? "" : base.substring(1);
+        }
         if (rel.isEmpty()) {
+            if (unixAbsoluteRoot) {
+                return base.isEmpty() ? "/" : "/" + base;
+            }
             return base;
         }
         // Treat base as directory: if it doesn't end with /, we still use its segments as the base
@@ -481,7 +490,14 @@ public class PathResolver {
                 result.add(seg);
             }
         }
-        return String.join("/", result);
+        String joined = String.join("/", result);
+        if (unixAbsoluteRoot) {
+            if (joined.isEmpty()) {
+                return "/";
+            }
+            return "/" + joined;
+        }
+        return joined;
     }
 
     /**

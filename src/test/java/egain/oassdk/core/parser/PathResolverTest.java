@@ -95,6 +95,16 @@ public class PathResolverTest {
     }
 
     @Test
+    public void testResolveRelativePathStringUnixAbsoluteBase() {
+        assertEquals(
+                "/tmp/a/c.yaml",
+                PathResolver.resolveRelativePathString("/tmp/a/b", "../c.yaml"));
+        assertEquals(
+                "/tmp/junit/outside.yaml",
+                PathResolver.resolveRelativePathString("/tmp/junit/base", "../outside.yaml"));
+    }
+
+    @Test
     public void testPathTraversalWithMultipleDots() {
         assertThrows(OASSDKException.class, () -> {
             pathResolver.resolveReference("../../../../../../../../nonexistent-oas-path-xyz.yaml", baseDir);
