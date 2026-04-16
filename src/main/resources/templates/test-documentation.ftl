@@ -32,6 +32,17 @@ A Postman collection is generated for manual testing:
 - Environment file: \`${postmanEnvironment}\`
 - Run with Newman: \`newman run ${postmanCollection} -e ${postmanEnvironment}\`
 
+## Schemathesis (contract testing)
+
+When the \`schemathesis\` test type is generated via the OAS SDK, the output bundle typically includes:
+
+- \`openapi.yaml\` — resolved OpenAPI document used as the schema source
+- \`schemathesis.properties\` — URLs, report paths, and options; CI may replace tokens such as \`%BASEURL%\`, \`%TOKEN%\`, \`%HUB%\`, \`%DOT%\`, \`%BUILD_NUMBER%\`
+- \`run-schemathesis.sh\` — invokes the \`st\` CLI (\`pip install schemathesis\`)
+- \`README-schemathesis.md\` — short runbook inside the bundle
+
+From the project CLI: \`oas-sdk tests <spec.yaml> -t schemathesis -o <outputDir> [--url <baseUrl>] [--run]\`.
+
 ## Test Configuration
 
 <#if testConfig.unitTestsEnabled>

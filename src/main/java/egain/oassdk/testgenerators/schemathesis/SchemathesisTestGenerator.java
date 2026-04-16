@@ -1,0 +1,267 @@
+package egain.oassdk.testgenerators.schemathesis;
+
+import egain.oassdk.Util;
+import egain.oassdk.config.TestConfig;
+import egain.oassdk.core.exceptions.GenerationException;
+import egain.oassdk.core.io.OpenApiMapYamlWriter;
+import egain.oassdk.testgenerators.ConfigurableTestGenerator;
+import egain.oassdk.testgenerators.TestGenerator;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Generates a Schemathesis bundle: resolved OpenAPI YAML, {@code schemathesis.properties}
+ * (paths and CI placeholders such as {@code %HUB%}, {@code %BASEURL%}, {@code %TOKEN%}),
+ * and {@code run-schemathesis.sh} wrapping {@code st run}.
+ * <p>Optional {@link TestConfig#getAdditionalProperties()} keys:
+ * <ul>
+ *   <li>{@code schemathesis.bundleDir} (String, default {@code schemathesis}) — subdirectory under
+ *       {@code outputDir}; use {@code .} to emit directly into {@code outputDir}</li>
+ *   <li>{@code schemathesis.baseUrl} / {@code schemathesis.url} — value for {@code BASEURL} in properties
+ *       (default: first {@code servers[].url} or {@code %BASEURL%})</li>
+ *   <li>{@code schemathesis.specFileName} (String, default {@code openapi.yaml})</li>
+ *   <li>{@code schemathesis.junitReport}, {@code schemathesis.vcrPath}, {@code schemathesis.consoleLog},
+ *       {@code schemathesis.coverageDir}, {@code schemathesis.rateLimit}, {@code schemathesis.checks},
+ *       {@code schemathesis.mode}, {@code schemathesis.phases}, {@code schemathesis.extraArgs}</li>
+ * </ul>
+ */
+public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTestGenerator {
+
+    private TestConfig config;
+
+    /**
+     * Directory that holds {@code openapi.yaml}, properties, and scripts for this generator.
+     */
+    public static Path resolveBundleDirectory(String outputDir, TestConfig config) {
+        Objects.requireNonNull(outputDir, "outputDir");
+        if (config != null && config.getAdditionalProperties() != null) {
+            Object o = config.getAdditionalProperties().get("schemathesis.bundleDir");
+            if (o != null) {
+                String s = o.toString().trim();
+                if (s.isEmpty() || ".".equals(s)) {
+                    return Paths.get(outputDir);
+                }
+                return Paths.get(outputDir, s);
+            }
+        }
+        return Paths.get(outputDir, "schemathesis");
+    }
+
+    @Override
+    public void generate(Map<String, Object> spec, String outputDir, TestConfig config, String testFramework) throws GenerationException {
+        this.config = config;
+        if (outputDir == null) {
+            throw new IllegalArgumentException("Output directory cannot be null");
+        }
+        try {
+            Path bundleDir = resolveBundleDirectory(outputDir, config);
+            Files.createDirectories(bundleDir);
+
+            String specFileName = propString(config, "schemathesis.specFileName", "openapi.yaml");
+            new OpenApiMapYamlWriter().write(spec, bundleDir.resolve(specFileName));
+
+            String baseUrl = resolveBaseUrl(spec, config);
+            Map<String, String> props = buildPropertyValues(baseUrl, specFileName, config);
+            writeProperties(bundleDir.resolve("schemathesis.properties"), props);
+
+            String script = buildRunScript(specFileName);
+            Path scriptPath = bundleDir.resolve("run-schemathesis.sh");
+            Files.writeString(scriptPath, script, StandardCharsets.UTF_8);
+            scriptPath.toFile().setExecutable(true);
+
+            Files.writeString(bundleDir.resolve("README-schemathesis.md"), buildReadme(), StandardCharsets.UTF_8);
+
+        } catch (IOException e) {
+            throw new GenerationException("Failed to generate Schemathesis bundle: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            throw new GenerationException("Failed to generate Schemathesis bundle: " + e.getMessage(), e);
+        }
+    }
+
+    private static String resolveBaseUrl(Map<String, Object> spec, TestConfig config) {
+        String fromConfig = propString(config, "schemathesis.baseUrl", null);
+        if (fromConfig == null || fromConfig.isBlank()) {
+            fromConfig = propString(config, "schemathesis.url", null);
+        }
+        if (fromConfig != null && !fromConfig.isBlank()) {
+            return fromConfig.trim();
+        }
+        List<Map<String, Object>> servers = Util.asStringObjectMapList(spec.get("servers"));
+        if (servers != null && !servers.isEmpty() && servers.get(0) != null) {
+            Object url = servers.get(0).get("url");
+            if (url instanceof String s && !s.isBlank()) {
+                return s.trim();
+            }
+        }
+        return "%BASEURL%";
+    }
+
+    private Map<String, String> buildPropertyValues(String baseUrl, String specFileName, TestConfig config) {
+        Map<String, String> m = new HashMap<>();
+        m.put("BASEURL", baseUrl);
+        m.put("SPEC_FILE", specFileName);
+        m.put("JUNIT_REPORT", propString(config, "schemathesis.junitReport",
+                "results-%HUB%-%DOT%-%BUILD_NUMBER%.xml"));
+        m.put("VCR_CASSETTE", propString(config, "schemathesis.vcrPath",
+                "cassette-%HUB%-%DOT%-%BUILD_NUMBER%.yaml"));
+        m.put("CONSOLE_LOG", propString(config, "schemathesis.consoleLog",
+                "runTest-%HUB%-%DOT%-%BUILD_NUMBER%.txt"));
+        m.put("RATE_LIMIT", propString(config, "schemathesis.rateLimit", "10000/m"));
+        m.put("CHECKS", propString(config, "schemathesis.checks", "all"));
+        m.put("MODE", propString(config, "schemathesis.mode", "all"));
+        m.put("PHASES", propString(config, "schemathesis.phases", "coverage"));
+        m.put("HEADER_ACCEPT", propString(config, "schemathesis.headerAccept", "Accept: application/json"));
+        m.put("HEADER_ACCEPT_LANG", propString(config, "schemathesis.headerAcceptLanguage", "Accept-language: en-US"));
+        m.put("HEADER_AUTH", propString(config, "schemathesis.headerAuthorization", "Authorization: %TOKEN%"));
+        m.put("EXTRA_ARGS", propString(config, "schemathesis.extraArgs", "").trim());
+        return m;
+    }
+
+    private static void writeProperties(Path path, Map<String, String> values) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# Schemathesis run configuration.\n");
+        sb.append("# Jenkins/CI may replace tokens like %HUB%, %DOT%, %BUILD_NUMBER%, %BASEURL%, %TOKEN%.\n");
+        sb.append("# For local runs, copy to schemathesis.local.properties (key=value) and export overrides.\n\n");
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+        }
+        Files.writeString(path, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private static String propString(TestConfig config, String key, String defaultValue) {
+        if (config == null || config.getAdditionalProperties() == null) {
+            return defaultValue;
+        }
+        Object v = config.getAdditionalProperties().get(key);
+        if (v == null) {
+            return defaultValue;
+        }
+        String s = v.toString();
+        return s.isEmpty() ? defaultValue : s;
+    }
+
+    private static String buildRunScript(String specFile) {
+        return """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                cd "$SCRIPT_DIR"
+                
+                get_prop() {
+                  local key="$1"
+                  local def="$2"
+                  local line
+                  line="$(grep -m1 "^[[:space:]]*${key}=" schemathesis.properties 2>/dev/null || true)"
+                  if [[ -z "$line" ]]; then
+                    printf '%s' "$def"
+                    return
+                  fi
+                  printf '%s' "${line#*=}"
+                }
+                
+                if [[ -f schemathesis.local.properties ]]; then
+                  set -a
+                  # shellcheck disable=SC1091
+                  source schemathesis.local.properties
+                  set +a
+                fi
+                
+                BASEURL="$(get_prop BASEURL '%BASEURL%')"
+                SPEC_FILE="$(get_prop SPEC_FILE '__SCHEMA_FILE__')"
+                JUNIT_REPORT="$(get_prop JUNIT_REPORT 'results-%HUB%-%DOT%-%BUILD_NUMBER%.xml')"
+                VCR_CASSETTE="$(get_prop VCR_CASSETTE 'cassette-%HUB%-%DOT%-%BUILD_NUMBER%.yaml')"
+                CONSOLE_LOG="$(get_prop CONSOLE_LOG 'runTest-%HUB%-%DOT%-%BUILD_NUMBER%.txt')"
+                RATE_LIMIT="$(get_prop RATE_LIMIT '10000/m')"
+                CHECKS="$(get_prop CHECKS 'all')"
+                MODE="$(get_prop MODE 'all')"
+                PHASES="$(get_prop PHASES 'coverage')"
+                HEADER_ACCEPT="$(get_prop HEADER_ACCEPT 'Accept: application/json')"
+                HEADER_ACCEPT_LANG="$(get_prop HEADER_ACCEPT_LANG 'Accept-language: en-US')"
+                HEADER_AUTH="$(get_prop HEADER_AUTH 'Authorization: %TOKEN%')"
+                EXTRA_ARGS="$(get_prop EXTRA_ARGS '')"
+                
+                if ! command -v st >/dev/null 2>&1; then
+                  echo "Schemathesis CLI (st) not found. Install: pip install schemathesis" >&2
+                  exit 1
+                fi
+                
+                # shellcheck disable=SC2086
+                st run \\
+                  --checks "$CHECKS" \\
+                  --mode "$MODE" \\
+                  --phases="$PHASES" \\
+                  --continue-on-failure \\
+                  --rate-limit="$RATE_LIMIT" \\
+                  --report-junit-path="$JUNIT_REPORT" \\
+                  --header "$HEADER_ACCEPT" \\
+                  --header "$HEADER_ACCEPT_LANG" \\
+                  --header "$HEADER_AUTH" \\
+                  --report-vcr-path="$VCR_CASSETTE" \\
+                  --url="$BASEURL" \\
+                  "$SPEC_FILE" \\
+                  --coverage-format=html \\
+                  $EXTRA_ARGS \\
+                  2>&1 | tee "$CONSOLE_LOG"
+                """.replace("__SCHEMA_FILE__", specFile);
+    }
+
+    private static String buildReadme() {
+        return """
+                # Schemathesis bundle
+                
+                ## Prerequisites
+                
+                - Python 3.10+ recommended
+                - `pip install schemathesis` (installs the `st` CLI)
+                
+                ## Files
+                
+                - `openapi.yaml` — OpenAPI document used by Schemathesis (from the SDK parse/filter pipeline).
+                - `schemathesis.properties` — paths and options; CI placeholders such as `%BASEURL%`, `%TOKEN%`, `%HUB%`, `%DOT%`, `%BUILD_NUMBER%` are left literal for your build server to replace.
+                - `run-schemathesis.sh` — runs `st run` with coverage, JUnit, and VCR outputs.
+                - Optional `schemathesis.local.properties` — shell-sourced before the run; use for local secrets (do not commit).
+                
+                ## Run
+                
+                ```bash
+                chmod +x run-schemathesis.sh
+                ./run-schemathesis.sh
+                ```
+                
+                Override defaults by editing `schemathesis.properties` or providing `schemathesis.local.properties`.
+                """;
+    }
+
+    @Override
+    public String getName() {
+        return "Schemathesis Test Generator";
+    }
+
+    @Override
+    public String getVersion() {
+        return "1.0.0";
+    }
+
+    @Override
+    public String getTestType() {
+        return "schemathesis";
+    }
+
+    @Override
+    public void setConfig(TestConfig config) {
+        this.config = config;
+    }
+
+    @Override
+    public TestConfig getConfig() {
+        return this.config;
+    }
+}

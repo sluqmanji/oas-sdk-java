@@ -63,6 +63,13 @@ public class TestGeneratorFactoryTest {
         assertNotNull(generator);
         assertTrue(generator instanceof egain.oassdk.testgenerators.postman.PostmanTestGenerator);
     }
+
+    @Test
+    public void testGetSchemathesisTestGenerator() {
+        TestGenerator generator = factory.getGenerator("schemathesis");
+        assertNotNull(generator);
+        assertTrue(generator instanceof egain.oassdk.testgenerators.schemathesis.SchemathesisTestGenerator);
+    }
     
     @Test
     public void testGetMockDataGenerator() {
@@ -118,6 +125,7 @@ public class TestGeneratorFactoryTest {
         assertTrue(java.util.Arrays.asList(types).contains("performance"));
         assertTrue(java.util.Arrays.asList(types).contains("security"));
         assertTrue(java.util.Arrays.asList(types).contains("postman"));
+        assertTrue(java.util.Arrays.asList(types).contains("schemathesis"));
         assertTrue(java.util.Arrays.asList(types).contains("mock_data"));
     }
     
@@ -129,6 +137,7 @@ public class TestGeneratorFactoryTest {
         assertTrue(factory.isSupported("performance"));
         assertTrue(factory.isSupported("security"));
         assertTrue(factory.isSupported("postman"));
+        assertTrue(factory.isSupported("schemathesis"));
         assertTrue(factory.isSupported("mock_data"));
         assertTrue(factory.isSupported("mockdata"));
         
@@ -141,6 +150,7 @@ public class TestGeneratorFactoryTest {
         assertTrue(factory.isSupported("UNIT"));
         assertTrue(factory.isSupported("Integration"));
         assertTrue(factory.isSupported("NFR"));
+        assertTrue(factory.isSupported("SCHEMATHESIS"));
     }
 
     @Test

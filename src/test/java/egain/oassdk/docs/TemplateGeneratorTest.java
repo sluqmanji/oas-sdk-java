@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -32,7 +33,7 @@ public class TemplateGeneratorTest {
     }
     
     @Test
-    public void testGenerateTestDocumentation_Success(@TempDir Path tempDir) throws GenerationException {
+    public void testGenerateTestDocumentation_Success(@TempDir Path tempDir) throws GenerationException, IOException {
         // Arrange
         TemplateGenerator.TestDocConfig config = new TemplateGenerator.TestDocConfig();
         config.setUnitTestsEnabled(true);
@@ -42,7 +43,10 @@ public class TemplateGeneratorTest {
         generator.generateTestDocumentation(spec, tempDir.toString(), config);
         
         // Assert
-        assertTrue(Files.exists(tempDir.resolve("TEST_DOCUMENTATION.md")));
+        Path doc = tempDir.resolve("TEST_DOCUMENTATION.md");
+        assertTrue(Files.exists(doc));
+        String content = Files.readString(doc);
+        assertTrue(content.contains("Schemathesis"));
     }
     
     @Test

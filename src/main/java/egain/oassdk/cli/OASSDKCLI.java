@@ -5,12 +5,19 @@ import egain.oassdk.config.GeneratorConfig;
 import egain.oassdk.config.SLAConfig;
 import egain.oassdk.config.TestConfig;
 import egain.oassdk.core.exceptions.OASSDKException;
+import egain.oassdk.testgenerators.schemathesis.SchemathesisTestGenerator;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -118,12 +125,22 @@ public class OASSDKCLI implements Callable<Integer> {
         @Option(names = {"--framework"}, description = "Test framework")
         private String framework;
 
+        @Option(names = {"--url", "--base-url"}, description = "Base URL for schemathesis.properties when generating schemathesis tests")
+        private String baseUrl;
+
+        @Option(names = {"--run"}, description = "After generation, run ./run-schemathesis.sh when types include schemathesis (requires bash and st on PATH)")
+        private boolean runSchemathesis;
+
         @Override
         public Integer call() {
             try {
-                // Initialize SDK
+                Map<String, Object> extra = new HashMap<>();
+                if (baseUrl != null && !baseUrl.isBlank()) {
+                    extra.put("schemathesis.baseUrl", baseUrl.trim());
+                }
                 TestConfig testConfig = TestConfig.builder()
                         .testFramework(framework)
+                        .additionalProperties(extra.isEmpty() ? null : extra)
                         .build();
                 try (OASSDK sdk = new OASSDK(null, testConfig, null)) {
                     // Load specification
@@ -132,6 +149,11 @@ public class OASSDKCLI implements Callable<Integer> {
                     // Generate tests
                     sdk.generateTests(types, framework, output);
 
+                    if (runSchemathesis && types != null
+                            && types.stream().anyMatch(t -> "schemathesis".equalsIgnoreCase(t))) {
+                        runSchemathesisScript(output, testConfig);
+                    }
+
                     logger.info("✅ Tests generated successfully in " + output);
                     return 0;
                 }
@@ -139,6 +161,32 @@ public class OASSDKCLI implements Callable<Integer> {
             } catch (OASSDKException e) {
                 logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
                 return 1;
+            } catch (IOException | InterruptedException e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                logger.log(Level.SEVERE, "❌ Error: " + e.getMessage(), e);
+                return 1;
+            }
+        }
+
+        private static void runSchemathesisScript(String output, TestConfig testConfig) throws OASSDKException, IOException, InterruptedException {
+            Path bundle = SchemathesisTestGenerator.resolveBundleDirectory(output, testConfig);
+            Path script = bundle.resolve("run-schemathesis.sh");
+            if (!Files.isRegularFile(script)) {
+                throw new OASSDKException("Expected Schemathesis script at " + script + ". Generate with -t schemathesis.");
+            }
+            String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+            List<String> command = os.contains("win")
+                    ? List.of("bash.exe", "./run-schemathesis.sh")
+                    : List.of("bash", "./run-schemathesis.sh");
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(bundle.toFile());
+            pb.inheritIO();
+            Process process = pb.start();
+            int exit = process.waitFor();
+            if (exit != 0) {
+                throw new OASSDKException("Schemathesis run exited with code " + exit);
             }
         }
     }

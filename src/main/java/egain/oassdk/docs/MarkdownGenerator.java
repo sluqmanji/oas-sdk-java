@@ -174,7 +174,8 @@ public class MarkdownGenerator {
                 "| Integration Tests | Test component interactions | `src/test/java/integration/` | Jersey Test | API endpoints, Database interactions |\n" +
                 "| NFR Tests | Test non-functional requirements | `src/test/java/nfr/` | Custom + JUnit 5 | Performance, Scalability, Reliability |\n" +
                 "| Performance Tests | Test system performance under load | `src/test/java/performance/` | JMeter, Gatling | Response time, Throughput, Resource usage |\n" +
-                "| Security Tests | Test security vulnerabilities | `src/test/java/security/` | OWASP ZAP, Custom | Authentication, Authorization, Input validation |\n\n" +
+                "| Security Tests | Test security vulnerabilities | `src/test/java/security/` | OWASP ZAP, Custom | Authentication, Authorization, Input validation |\n" +
+                "| Schemathesis | Contract testing vs live API | `schemathesis/` (generated bundle) | Schemathesis (`st`) | OpenAPI conformance, coverage |\n\n" +
 
                 // Running Tests
                 "## Running Tests\n\n" +
@@ -199,7 +200,10 @@ public class MarkdownGenerator {
                 "A Postman collection is generated for manual testing:\n" +
                 "- Collection file: `API.postman_collection.json`\n" +
                 "- Environment file: `API-Environment.postman_environment.json`\n" +
-                "- Run with Newman: `newman run API.postman_collection.json -e API-Environment.postman_environment.json`\n\n";
+                "- Run with Newman: `newman run API.postman_collection.json -e API-Environment.postman_environment.json`\n\n" +
+
+                "## Schemathesis\n\n" +
+                "When generated via the OAS SDK (`schemathesis` test type), the bundle includes `openapi.yaml`, `schemathesis.properties`, `run-schemathesis.sh`, and `README-schemathesis.md`. Install `st` (`pip install schemathesis`), configure `schemathesis.properties`, then run `./run-schemathesis.sh` from the bundle directory.\n\n";
 
         Files.write(Paths.get(outputDir, "TEST_DOCUMENTATION.md"), markdown.getBytes(StandardCharsets.UTF_8));
     }

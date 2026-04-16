@@ -80,6 +80,7 @@ All generated Java applications use industry-standard **JAX-RS annotations** (@P
     - Performance Tests (JMeter, Gatling)
     - Security Tests (OWASP ZAP, RBAC, CORS, rate limiting)
     - Postman Collections with automated scripts
+    - **Schemathesis** contract testing bundle (`openapi.yaml`, `schemathesis.properties`, `run-schemathesis.sh` using the `st` CLI; optional `--run` on the SDK CLI)
     - Randomized Sequence Testing (OAS-driven, with dependency inference and cleanup)
 
 - **📊 Mock Data**: Realistic mock data generation based on OpenAPI schemas
@@ -293,7 +294,7 @@ public class Example {
             // Generate comprehensive test suites
             // Tests are automatically generated in the same language as your application
             sdk.generateTests(
-                List.of("unit", "integration", "nfr", "postman"), 
+                List.of("unit", "integration", "nfr", "postman", "schemathesis"), 
                 "./generated-tests"
             );
             
@@ -474,7 +475,7 @@ sdk.filterOperations(operationFilters);
 
 // Generate everything for filtered APIs only
 sdk.generateApplication("java", "jersey", "com.example.api", "./generated-app");
-sdk.generateTests(List.of("unit", "integration", "postman"), "./generated-tests");
+sdk.generateTests(List.of("unit", "integration", "postman", "schemathesis"), "./generated-tests");
 sdk.generateDocumentation("./generated-docs");
 sdk.generateMockData("./generated-mock-data");
 ```
@@ -1317,12 +1318,17 @@ java -jar oas-sdk.jar docs --spec openapi.yaml --output ./generated-docs
 # Validate OpenAPI specification
 java -jar oas-sdk.jar validate --spec openapi.yaml
 
-# Generate tests (automatically matches application language)
-java -jar oas-sdk.jar tests --spec openapi.yaml --types unit,integration,postman --output ./generated-tests
+# Generate tests (positional spec path; `-t` / `--types` is comma-separated)
+java -jar oas-sdk.jar tests openapi.yaml -t unit,integration,postman -o ./generated-tests
 
-# Generate tests with explicit language/framework
-java -jar oas-sdk.jar tests --spec openapi.yaml --types unit,integration --language python --framework pytest --output ./generated-tests
-java -jar oas-sdk.jar tests --spec openapi.yaml --types unit,integration --language nodejs --framework jest --output ./generated-tests
+# Schemathesis bundle (under ./generated-tests/schemathesis/ by default): properties + st run script
+java -jar oas-sdk.jar tests openapi.yaml -t schemathesis -o ./generated-tests --url https://api.example.com
+# Optionally run ./run-schemathesis.sh after generation (requires bash and `st` on PATH)
+java -jar oas-sdk.jar tests openapi.yaml -t schemathesis -o ./generated-tests --url https://api.example.com --run
+
+# Generate tests with explicit test framework (when supported by the selected test types)
+java -jar oas-sdk.jar tests openapi.yaml -t unit,integration -o ./generated-tests --framework pytest
+java -jar oas-sdk.jar tests openapi.yaml -t unit,integration -o ./generated-tests --framework jest
 ```
 
 ## 📚 Documentation Generation
@@ -1854,6 +1860,7 @@ Tests are generated in the same language as your application code for seamless i
   - CORS preflight and unauthorized origin testing
   - Rate limiting verification
 - **Postman Collection**: Complete API testing collection with automated scripts (language-agnostic)
+- **Schemathesis**: API contract testing bundle with `openapi.yaml`, `schemathesis.properties` (CI placeholders such as `%BASEURL%`, `%TOKEN%`), and `run-schemathesis.sh` invoking the `st` CLI; output defaults to `<output>/schemathesis/` (language-agnostic)
 - **Randomized Sequence Tests**: OAS-driven end-to-end testing (Java-based)
   - Endpoints extracted dynamically from OAS spec (not hardcoded)
   - Request bodies generated from OAS schemas
@@ -2027,6 +2034,18 @@ npm run test:integration
 npm run test:coverage
 ```
 
+#### Schemathesis (contract / fuzz against a live API)
+
+When you generate tests with type `schemathesis`, the SDK writes a bundle (by default under `<output>/schemathesis/`) containing `openapi.yaml`, `schemathesis.properties`, `run-schemathesis.sh`, and `README-schemathesis.md`. Install the CLI (`pip install schemathesis`, command `st`), set `BASEURL` and headers in `schemathesis.properties` or use CI token substitution (`%BASEURL%`, `%TOKEN%`, etc.), then:
+
+```bash
+cd ./generated-tests/schemathesis   # if -o ./generated-tests
+chmod +x run-schemathesis.sh
+./run-schemathesis.sh
+```
+
+From the packaged CLI you can also pass `--url` / `--base-url` when generating, and `--run` to execute the script immediately after generation (requires `bash` and `st` on `PATH`).
+
 ## 🤝 Contributing
 
 We welcome contributions! Please follow these steps:
@@ -2091,6 +2110,7 @@ For support and questions:
   - [x] JWT authentication middleware
   - [x] Scope-based authorization
 - [x] Postman collection generation
+- [x] Schemathesis bundle generation (`st run` script, properties, optional CLI `--run`)
 - [x] Mock data generation
 - [x] Redocly documentation with CLI integration
 - [x] Swagger UI with library integration

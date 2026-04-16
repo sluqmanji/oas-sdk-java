@@ -10,6 +10,7 @@ import egain.oassdk.testgenerators.performance.PerformanceTestGenerator;
 import egain.oassdk.testgenerators.postman.PostmanTestGenerator;
 import egain.oassdk.testgenerators.python.PytestIntegrationTestGenerator;
 import egain.oassdk.testgenerators.python.PytestUnitTestGenerator;
+import egain.oassdk.testgenerators.schemathesis.SchemathesisTestGenerator;
 import egain.oassdk.testgenerators.security.SecurityTestGenerator;
 import egain.oassdk.testgenerators.unit.UnitTestGenerator;
 
@@ -24,7 +25,7 @@ public class TestGeneratorFactory {
     /**
      * Get test generator for specific test type with language/framework awareness
      *
-     * @param testType Type of test (unit, integration, nfr, performance, security, postman, mock_data)
+     * @param testType Type of test (unit, integration, nfr, performance, security, postman, schemathesis, mock_data)
      * @param config   Test configuration containing language and framework information
      * @return Test generator instance
      * @throws IllegalArgumentException if test type or language/framework combination is not supported
@@ -61,6 +62,10 @@ public class TestGeneratorFactory {
 
             case "postman":
                 generator = new PostmanTestGenerator();
+                break;
+
+            case "schemathesis":
+                generator = new SchemathesisTestGenerator();
                 break;
 
             case "mock_data":
@@ -123,7 +128,7 @@ public class TestGeneratorFactory {
     /**
      * Get test generator for specific test type (legacy method for backwards compatibility)
      *
-     * @param testType Type of test (unit, integration, nfr, performance, security, postman, mock_data)
+     * @param testType Type of test (unit, integration, nfr, performance, security, postman, schemathesis, mock_data)
      * @return Test generator instance
      * @throws IllegalArgumentException if test type is not supported
      */
@@ -149,6 +154,7 @@ public class TestGeneratorFactory {
                 "performance",
                 "security",
                 "postman",
+                "schemathesis",
                 "mock_data"
         };
     }
