@@ -180,6 +180,13 @@
             <groupId>com.github.javafaker</groupId>
             <artifactId>javafaker</artifactId>
             <version>${faker.version}</version>
+            <!-- Avoid two SnakeYAML artifacts (2.0 + 1.23-android); classpath order then breaks Faker or Jackson -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.yaml</groupId>
+                    <artifactId>snakeyaml</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Testing -->
