@@ -43,7 +43,7 @@ This directory contains examples demonstrating how to use the eGain OAS SDK Java
 
 ### **Generate tests for published V4 APIs**
 - **File**: `egain/oassdk/examples/GeneratePublishedV4Tests.java`
-- **Description**: Finds every `v4/api.yaml` under the published root, uses `GeneratorConfig.searchPaths` so `$ref` to `models/` and sibling files resolve, and writes Java tests (unit, integration, NFR, performance, security, Postman, mock data) into `generated-tests` next to each spec (for example `core/usermgr/v4/generated-tests/`).
+- **Description**: Finds every `v4/api.yaml` under the published root, uses `GeneratorConfig.searchPaths` so `$ref` to `models/` and sibling files resolve, and writes Java tests (unit, integration, NFR, performance, security, Postman, mock data) into `generated-tests` next to each spec (for example `core/usermgr/v4/generated-tests/`). Add `schemathesis` to the generated test types list in that driver if you also want a Schemathesis bundle per spec.
 - **Configuration**: System property `oas.published.root` or environment variable `OAS_PUBLISHED_ROOT` (default: `C:\eGain\published`).
 - **How to run**:
   1. From repo root: `mvn clean package -DskipTests` (compiles nested examples via `build-helper-maven-plugin`).
@@ -284,8 +284,11 @@ java -jar oas-sdk.jar docs --spec openapi.yaml --output ./generated-docs
 # Validate OpenAPI specification
 java -jar oas-sdk.jar validate --spec openapi.yaml
 
-# Generate tests
-java -jar oas-sdk.jar tests --spec openapi.yaml --types unit,integration,postman --output ./generated-tests
+# Generate tests (positional spec path)
+java -jar oas-sdk.jar tests openapi.yaml -t unit,integration,postman -o ./generated-tests
+
+# Schemathesis bundle (see README-schemathesis.md inside ./generated-tests/schemathesis/)
+java -jar oas-sdk.jar tests openapi.yaml -t schemathesis -o ./generated-tests --url https://api.example.com
 ```
 
 ## 🔧 Configuration Options
@@ -331,7 +334,8 @@ generated/
 │   ├── unit/             # Unit tests (JUnit 5)
 │   ├── integration/      # Integration tests (Jersey Test)
 │   ├── nfr/              # NFR tests
-│   └── postman/          # Postman collection
+│   ├── postman/          # Postman collection
+│   └── schemathesis/     # Schemathesis bundle (when -t includes schemathesis)
 ├── generated-mock-data/  # Mock data
 │   ├── json/             # JSON examples
 │   └── factories/        # Test data factories
@@ -351,6 +355,7 @@ generated/
 - **Integration Tests**: End-to-end API testing (Jersey Test)
 - **NFR Tests**: Performance, security, scalability, reliability, compliance
 - **Postman Collection**: Complete API testing collection with automated scripts
+- **Schemathesis**: Contract-testing bundle (`st run` script, `schemathesis.properties`, embedded `openapi.yaml`)
 - **Mock Data**: Structured test data and generators
 - **Randomized Sequence Tests**: Property-based testing with random API call sequences
 
@@ -381,6 +386,7 @@ mvn test jacoco:report
 - **Integration Tests**: End-to-end API testing (Jersey Test)
 - **NFR Tests**: Performance, security, scalability validation
 - **Postman Collection**: Run with Newman CLI
+- **Schemathesis**: From the generated `schemathesis/` folder, run `./run-schemathesis.sh` after `pip install schemathesis`
 - **Mock Data**: Dynamic test data generation
 
 ## 📈 Performance Testing

@@ -133,6 +133,15 @@ public class TemplateGenerator {
         securityTests.put("enabled", config.isSecurityTestsEnabled());
         testTypes.add(securityTests);
 
+        Map<String, Object> schemathesisTests = new HashMap<>();
+        schemathesisTests.put("name", "Schemathesis");
+        schemathesisTests.put("purpose", "Property-based contract testing against a running API (st CLI)");
+        schemathesisTests.put("location", "schemathesis/ (generated bundle next to other test outputs)");
+        schemathesisTests.put("framework", "Schemathesis (st)");
+        schemathesisTests.put("coverage", "OpenAPI conformance, status codes, headers, schema coverage");
+        schemathesisTests.put("enabled", true);
+        testTypes.add(schemathesisTests);
+
         dataModel.put("testTypes", testTypes);
 
         // Test commands
@@ -143,6 +152,8 @@ public class TemplateGenerator {
         testCommands.add("mvn test -Dtest=*NFRTest");
         testCommands.add("mvn test -Dtest=*PerformanceTest");
         testCommands.add("mvn test -Dtest=*SecurityTest");
+        testCommands.add("# Schemathesis (after: oas-sdk tests <spec> -t schemathesis -o <dir>)");
+        testCommands.add("cd schemathesis && chmod +x run-schemathesis.sh && ./run-schemathesis.sh");
         dataModel.put("testCommands", testCommands);
 
         // Mock data info

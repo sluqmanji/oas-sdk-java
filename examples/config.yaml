@@ -11,6 +11,7 @@ generator:
   custom_templates: false
 
 # Test configuration
+# SDK test types include: unit, integration, nfr, performance, security, postman, schemathesis, mock_data (see README).
 test:
   unit_tests: true
   integration_tests: true

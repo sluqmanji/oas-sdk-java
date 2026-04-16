@@ -47,11 +47,11 @@ public class SchemathesisTestRunnerTest {
 
         runner.executeTests(spec, outputDir, baseUrl);
 
-        Path configPath = tempDir.resolve("schemathesis.yaml");
-        assertTrue(Files.exists(configPath));
-        String content = new String(Files.readAllBytes(configPath));
-        assertTrue(content.contains("base_url: " + baseUrl));
-        assertTrue(content.contains("schema: openapi.yaml"));
+        Path propsPath = tempDir.resolve("schemathesis.properties");
+        assertTrue(Files.exists(propsPath));
+        String content = Files.readString(propsPath);
+        assertTrue(content.contains("BASEURL=" + baseUrl));
+        assertTrue(Files.exists(tempDir.resolve("openapi.yaml")));
     }
 
     @Test
@@ -61,11 +61,11 @@ public class SchemathesisTestRunnerTest {
 
         runner.executeTests(spec, outputDir, baseUrl);
 
-        Path scriptPath = tempDir.resolve("run-schemathesis-tests.sh");
+        Path scriptPath = tempDir.resolve("run-schemathesis.sh");
         assertTrue(Files.exists(scriptPath));
-        String content = new String(Files.readAllBytes(scriptPath));
-        assertTrue(content.contains("Base URL: " + baseUrl));
-        assertTrue(content.contains("schemathesis run"));
+        String content = Files.readString(scriptPath);
+        assertTrue(content.contains("st run"));
+        assertTrue(content.contains("--checks"));
     }
 
     @Test

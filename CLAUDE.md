@@ -41,14 +41,14 @@ mvn package
 
 - **`cli`** — PicoCLI-based CLI entry point (`OASSDKCLI`). Commands: `generate`, `tests`, `validate`, `docs`, `all`.
 - **`config`** — Configuration classes with Builder pattern: `GeneratorConfig`, `TestConfig`, `SLAConfig`, `ObservabilityConfig`.
-- **`core`** — OpenAPI parsing (`OASParser`), validation (`OASValidator`), metadata extraction (`OASMetadata`). Parser handles external `$ref` resolution and ZIP-based spec loading.
+- **`core`** — OpenAPI parsing (`OASParser`), validation (`OASValidator`), metadata extraction (`OASMetadata`). Parser handles external `$ref` resolution and ZIP-based spec loading. **`core.io`** — `OpenApiMapYamlWriter` for serializing parsed spec maps to YAML (e.g. Schemathesis bundles).
 - **`generators`** — Code generation via Factory + Strategy pattern:
   - `GeneratorFactory` creates language/framework-specific generators (`CodeGenerator` interface)
   - `generators.java` — Java/Jersey generator decomposed into focused classes: `JerseyGenerator` (orchestrator), `JerseyModelGenerator` (POJOs from schemas), `JerseyResourceGenerator` (JAX-RS resources), `JerseySchemaOneOfXor` (simple oneOf XOR for models), `JerseyBuildGenerator` (pom.xml), `JerseyObservabilityGenerator`, `JerseyAuthorizationDataGenerator`, etc.
   - `generators.python` — FastAPI and Flask generators
   - `generators.nodejs` — Express generator
   - `generators.go`, `generators.csharp` — Stubs
-- **`testgenerators`** — Test generation via `TestGeneratorFactory`. Subtypes: `unit`, `integration`, `nfr`, `performance`, `security`, `postman`, `mock`.
+- **`testgenerators`** — Test generation via `TestGeneratorFactory`. Subtypes: `unit`, `integration`, `nfr`, `performance`, `security`, `postman`, `schemathesis`, `mock`.
 - **`docs`** — Documentation generation (Swagger UI, Markdown, FreeMarker templates).
 - **`sla`** — SLA enforcement: rate limiting, API gateway policies, Prometheus/Grafana monitoring.
 
