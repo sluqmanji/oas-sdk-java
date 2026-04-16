@@ -3,6 +3,8 @@ package egain.oassdk.core.parser;
 import egain.oassdk.core.exceptions.OASSDKException;
 
 import java.io.IOException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -165,7 +167,7 @@ public class PathResolver {
                     String resolvedStr = resolveRelativePathString(baseStr, sanitizedPath);
                     if (resolvedStr != null) {
                         resolvedPathStr = resolvedStr;
-                        resolvedPath = baseDir.getFileSystem().getPath(resolvedStr);
+                        resolvedPath = pathFromCollapsedRelative(baseDir, resolvedStr);
                     } else {
                         resolvedPath = baseDir.resolve(sanitizedPath).normalize();
                     }
@@ -307,6 +309,24 @@ public class PathResolver {
 
         throw new OASSDKException("Referenced file not found: " + filePath +
                 " (searched in base directory and " + searchPaths.size() + " search paths)");
+    }
+
+    /**
+     * Turn a Unix-style path string produced by {@link #resolveRelativePathString} into a {@link Path}
+     * on the same {@link java.nio.file.FileSystem} as {@code baseDir}.
+     * <p>On the default file system, {@link Path#of(String, String...)} is used for collapsed absolute paths
+     * (e.g. Windows {@code C:/...}) so {@link Files#exists} matches the real file; {@code FileSystem#getPath}
+     * with a single string can fail to resolve correctly in some environments.</p>
+     */
+    private static Path pathFromCollapsedRelative(Path baseDir, String resolvedStr) {
+        FileSystem fs = baseDir.getFileSystem();
+        if (fs.equals(FileSystems.getDefault())) {
+            Path candidate = Path.of(resolvedStr).normalize();
+            if (candidate.isAbsolute()) {
+                return candidate;
+            }
+        }
+        return fs.getPath(resolvedStr);
     }
 
     /**
