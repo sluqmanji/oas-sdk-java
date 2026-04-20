@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Randomized sequence tests (RST) aligned with Integrated-style flows: OAS-driven scenario templates (create/edit/delete + get), query-parameter positives, optional 401 expectations, `Location` header and `{param}` path resolution, scenario-biased sequences, and `GenerateRstFromPublishedSpec` (`mvn exec:java` with env `RST_*`) for published bundles without full SDK validation.
 - Comprehensive logging system with file rotation
 - Configurable logging via properties file, system properties, or environment variables
 - Error level logging for all exception cases
