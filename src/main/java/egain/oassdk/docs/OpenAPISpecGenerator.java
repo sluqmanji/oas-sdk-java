@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import egain.oassdk.Util;
 import egain.oassdk.core.exceptions.GenerationException;
+import egain.oassdk.core.io.OpenApiMapYamlWriter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -480,47 +481,9 @@ public class OpenAPISpecGenerator {
 
     /**
      * Create a deep-copied, serialization-safe version of the spec.
-     * Breaks potential object cycles using identity tracking.
      */
     private Map<String, Object> prepareForSerialization(Map<String, Object> root) {
-        return Util.asStringObjectMap(deepCopy(root, new java.util.IdentityHashMap<>()));
-    }
-
-    private Object deepCopy(Object value, java.util.Map<Object, Object> seen) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof String || value instanceof Number || value instanceof Boolean) {
-            return value;
-        }
-        if (value instanceof com.fasterxml.jackson.databind.JsonNode) {
-            // JsonNodes are safe to reuse
-            return value;
-        }
-        if (seen.containsKey(value)) {
-            // Break cycles by replacing with a descriptive placeholder
-            return "<circular-reference>";
-        }
-        seen.put(value, Boolean.TRUE);
-
-        if (value instanceof Map<?, ?>) {
-            Map<String, Object> copied = new java.util.LinkedHashMap<>();
-            for (Map.Entry<?, ?> e : ((Map<?, ?>) value).entrySet()) {
-                Object k = e.getKey();
-                String key = k == null ? "null" : String.valueOf(k);
-                copied.put(key, deepCopy(e.getValue(), seen));
-            }
-            return copied;
-        }
-        if (value instanceof Iterable<?>) {
-            java.util.List<Object> copied = new java.util.ArrayList<>();
-            for (Object item : (Iterable<?>) value) {
-                copied.add(deepCopy(item, seen));
-            }
-            return copied;
-        }
-        // Fallback for unexpected types
-        return String.valueOf(value);
+        return OpenApiMapYamlWriter.copyForSerialization(root);
     }
 
     /**

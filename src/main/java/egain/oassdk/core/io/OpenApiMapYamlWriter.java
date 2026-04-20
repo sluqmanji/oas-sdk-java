@@ -10,10 +10,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Writes a parsed OpenAPI document (root map) to UTF-8 YAML using a serialization-safe deep copy.
@@ -32,11 +34,25 @@ public final class OpenApiMapYamlWriter {
     }
 
     /**
+     * Deep copy for YAML/JSON serialization. The same {@link Map} or {@link List} instance may appear
+     * from multiple parents (a DAG); each reference is copied independently. Only true cycles
+     * (re-entering the same collection while it is still being copied) are replaced with an empty
+     * map or list so output stays valid.
+     *
+     * @param root parsed OpenAPI root map
+     * @return a tree-shaped copy safe for Jackson serialization
+     */
+    public static Map<String, Object> copyForSerialization(Map<String, Object> root) {
+        Object copied = deepCopyValue(root, Collections.newSetFromMap(new IdentityHashMap<>()));
+        return Util.asStringObjectMap(copied);
+    }
+
+    /**
      * @param spec   root specification map
      * @param target path to write (e.g. openapi.yaml)
      */
     public void write(Map<String, Object> spec, Path target) throws java.io.IOException {
-        Map<String, Object> safe = prepareForSerialization(spec);
+        Map<String, Object> safe = copyForSerialization(spec);
         String yaml = yamlMapper.writeValueAsString(safe);
         Path parent = target.getParent();
         if (parent != null) {
@@ -45,12 +61,7 @@ public final class OpenApiMapYamlWriter {
         Files.writeString(target, yaml, StandardCharsets.UTF_8);
     }
 
-    private Map<String, Object> prepareForSerialization(Map<String, Object> root) {
-        Object copied = deepCopy(root, new IdentityHashMap<>());
-        return Util.asStringObjectMap(copied);
-    }
-
-    private Object deepCopy(Object value, Map<Object, Object> seen) {
+    private static Object deepCopyValue(Object value, Set<Object> visiting) {
         if (value == null) {
             return null;
         }
@@ -60,26 +71,37 @@ public final class OpenApiMapYamlWriter {
         if (value instanceof com.fasterxml.jackson.databind.JsonNode) {
             return value;
         }
-        if (seen.containsKey(value)) {
-            return "<circular-reference>";
-        }
-        seen.put(value, Boolean.TRUE);
-
         if (value instanceof Map<?, ?> rawMap) {
-            Map<String, Object> copied = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> e : rawMap.entrySet()) {
-                Object k = e.getKey();
-                String key = k == null ? "null" : String.valueOf(k);
-                copied.put(key, deepCopy(e.getValue(), seen));
+            if (visiting.contains(value)) {
+                return new LinkedHashMap<>();
             }
-            return copied;
+            visiting.add(value);
+            try {
+                Map<String, Object> copied = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> e : rawMap.entrySet()) {
+                    Object k = e.getKey();
+                    String key = k == null ? "null" : String.valueOf(k);
+                    copied.put(key, deepCopyValue(e.getValue(), visiting));
+                }
+                return copied;
+            } finally {
+                visiting.remove(value);
+            }
         }
         if (value instanceof Iterable<?> iterable) {
-            List<Object> copied = new ArrayList<>();
-            for (Object item : iterable) {
-                copied.add(deepCopy(item, seen));
+            if (visiting.contains(value)) {
+                return new ArrayList<>();
             }
-            return copied;
+            visiting.add(value);
+            try {
+                List<Object> copied = new ArrayList<>();
+                for (Object item : iterable) {
+                    copied.add(deepCopyValue(item, visiting));
+                }
+                return copied;
+            } finally {
+                visiting.remove(value);
+            }
         }
         return String.valueOf(value);
     }
