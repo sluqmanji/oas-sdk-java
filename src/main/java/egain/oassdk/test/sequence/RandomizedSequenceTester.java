@@ -8,6 +8,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import static java.util.Locale.ROOT;
 
 /**
  * Generates randomized sequence testing of API using OpenAPI spec.
@@ -15,6 +20,8 @@ import java.util.*;
  * test sequences rather than hardcoded endpoints.
  */
 public class RandomizedSequenceTester {
+
+    private static final Pattern PATH_PARAM_PATTERN = Pattern.compile("\\{([^}]+)}");
 
     /**
      * Generate sequence tests
@@ -79,6 +86,8 @@ public class RandomizedSequenceTester {
 
                     // Extract resource name from path (e.g., /api/users/{id} -> users)
                     info.resourceName = extractResourceName(path);
+                    info.pathParamNames = extractPathParamNames(path);
+                    info.defaultQueryParams = buildDefaultQueryParams(operation, spec);
 
                     calls.add(info);
                 }
@@ -99,6 +108,203 @@ public class RandomizedSequenceTester {
             }
         }
         return "resource";
+    }
+
+    private List<String> extractPathParamNames(String path) {
+        List<String> names = new ArrayList<>();
+        Matcher m = PATH_PARAM_PATTERN.matcher(path);
+        while (m.find()) {
+            names.add(m.group(1));
+        }
+        return names;
+    }
+
+    private Map<String, String> buildDefaultQueryParams(Map<String, Object> operation, Map<String, Object> spec) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (Map<String, Object> param : listOperationParameters(operation, spec)) {
+            if (!"query".equalsIgnoreCase((String) param.get("in"))) {
+                continue;
+            }
+            String name = (String) param.get("name");
+            if (name == null) {
+                continue;
+            }
+            Map<String, Object> schema = Util.asStringObjectMap(param.get("schema"));
+            if (schema == null) {
+                continue;
+            }
+            String val = pickExampleForQueryParam(schema);
+            if (val != null) {
+                map.put(name, val);
+            } else if (Boolean.TRUE.equals(param.get("required"))) {
+                map.put(name, "1");
+            }
+        }
+        return map;
+    }
+
+    private List<Map<String, Object>> listOperationParameters(Map<String, Object> operation, Map<String, Object> spec) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        Object raw = operation.get("parameters");
+        if (!(raw instanceof List<?> list)) {
+            return out;
+        }
+        for (Object item : list) {
+            Map<String, Object> m = Util.asStringObjectMap(item);
+            if (m == null) {
+                continue;
+            }
+            if (m.containsKey("$ref")) {
+                Map<String, Object> resolved = resolveParameterRef((String) m.get("$ref"), spec);
+                if (resolved != null) {
+                    out.add(resolved);
+                }
+            } else {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private Map<String, Object> resolveParameterRef(String ref, Map<String, Object> spec) {
+        if (ref == null || !ref.startsWith("#/components/parameters/")) {
+            return null;
+        }
+        String paramName = ref.substring("#/components/parameters/".length());
+        Map<String, Object> components = Util.asStringObjectMap(spec.get("components"));
+        if (components == null) {
+            return null;
+        }
+        Map<String, Object> parameters = Util.asStringObjectMap(components.get("parameters"));
+        if (parameters == null) {
+            return null;
+        }
+        return Util.asStringObjectMap(parameters.get(paramName));
+    }
+
+    private String pickExampleForQueryParam(Map<String, Object> schema) {
+        if (schema == null) {
+            return null;
+        }
+        Object ex = schema.get("example");
+        if (ex instanceof String s) {
+            return s;
+        }
+        if (ex instanceof Number || ex instanceof Boolean) {
+            return String.valueOf(ex);
+        }
+        Object def = schema.get("default");
+        if (def instanceof String s) {
+            return s;
+        }
+        if (def instanceof Number || def instanceof Boolean) {
+            return String.valueOf(def);
+        }
+        Object enumRaw = schema.get("enum");
+        if (enumRaw instanceof List<?> enums && !enums.isEmpty()) {
+            Object first = enums.getFirst();
+            return first != null ? String.valueOf(first) : null;
+        }
+        String type = (String) schema.get("type");
+        if ("integer".equals(type) || "number".equals(type)) {
+            Object min = schema.get("minimum");
+            if (min instanceof Number n) {
+                return String.valueOf(n.longValue());
+            }
+            return "0";
+        }
+        if ("boolean".equals(type)) {
+            return "true";
+        }
+        if ("string".equals(type)) {
+            return "test";
+        }
+        return null;
+    }
+
+    private String escapeJavaStringLiteral(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /**
+     * Java expression for an immutable map (up to 5 entries); otherwise double-brace LinkedHashMap.
+     */
+    private String toJavaMapExpression(Map<String, String> map) {
+        if (map == null || map.isEmpty()) {
+            return "Collections.emptyMap()";
+        }
+        if (map.size() <= 5) {
+            StringBuilder sb = new StringBuilder("Map.of(");
+            boolean first = true;
+            for (Map.Entry<String, String> e : map.entrySet()) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                first = false;
+                sb.append('"').append(escapeJavaStringLiteral(e.getKey())).append("\", \"")
+                        .append(escapeJavaStringLiteral(e.getValue())).append('"');
+            }
+            sb.append(')');
+            return sb.toString();
+        }
+        StringBuilder sb = new StringBuilder("new LinkedHashMap<>() {{\n");
+        for (Map.Entry<String, String> e : map.entrySet()) {
+            sb.append("                put(\"")
+                    .append(escapeJavaStringLiteral(e.getKey())).append("\", \"")
+                    .append(escapeJavaStringLiteral(e.getValue())).append("\");\n");
+        }
+        sb.append("            }}");
+        return sb.toString();
+    }
+
+    private void appendAPICallConstructor(
+            StringBuilder sb,
+            String indent,
+            String concreteApicallType,
+            APICallInfo call,
+            Map<String, Object> spec,
+            Map<String, String> queryOverride,
+            int expectedStatus,
+            boolean noAuth) {
+        String body = "null";
+        if (call.hasRequestBody) {
+            String mockBody = buildRequestBodyForOperation(call.operation, spec);
+            body = mockBody != null ? "\"" + mockBody + "\"" : "null";
+        }
+        Map<String, String> query = new LinkedHashMap<>(call.defaultQueryParams);
+        if (queryOverride != null) {
+            query.putAll(queryOverride);
+        }
+        sb.append(indent).append("new ").append(concreteApicallType).append("(\"")
+                .append(call.method).append("\", \"")
+                .append(escapeJavaStringLiteral(call.path)).append("\", ")
+                .append(body).append(", null, ")
+                .append(toJavaMapExpression(query)).append(", ")
+                .append(expectedStatus).append(", ")
+                .append(noAuth).append(")");
+    }
+
+    private APICallInfo findByOperationId(List<APICallInfo> apiCalls, String operationId) {
+        if (operationId == null) {
+            return null;
+        }
+        for (APICallInfo c : apiCalls) {
+            if (operationId.equals(c.operationId)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    private APICallInfo findByOperationIdContains(List<APICallInfo> apiCalls, String substring) {
+        String low = substring.toLowerCase(ROOT);
+        return apiCalls.stream()
+                .filter(c -> c.operationId != null && c.operationId.toLowerCase(ROOT).contains(low))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
@@ -232,22 +438,18 @@ public class RandomizedSequenceTester {
      * Generate sequence test framework
      */
     private void generateSequenceTestFramework(Map<String, Object> spec, String outputDir, String baseUrl, List<APICallInfo> apiCalls) throws IOException {
-        // Build resource names for dynamic state extraction
-        Set<String> resourceNames = new LinkedHashSet<>();
+        Set<String> pathParamNamesUnion = new LinkedHashSet<>();
         for (APICallInfo call : apiCalls) {
-            resourceNames.add(call.resourceName);
+            pathParamNamesUnion.addAll(call.pathParamNames);
         }
-
-        StringBuilder stateExtraction = new StringBuilder();
-        for (String resource : resourceNames) {
-            stateExtraction.append(String.format("""
-                                    if (call.getPath().contains("/%s")) {
-                                        String extractedId = extractIdFromResponse(responseBody);
-                                        if (extractedId != null) {
-                                            state.put("%s_id", extractedId);
-                                        }
-                                    }
-                    """, resource, resource));
+        StringBuilder bodyIdBootstrap = new StringBuilder();
+        StringBuilder locationBootstrap = new StringBuilder();
+        for (String n : pathParamNamesUnion) {
+            String esc = escapeJavaStringLiteral(n);
+            bodyIdBootstrap.append("                            state.putIfAbsent(\"")
+                    .append(esc).append("\", extractedId);\n");
+            locationBootstrap.append("            state.putIfAbsent(\"")
+                    .append(esc).append("\", lastSegment);\n");
         }
 
         String framework = """
@@ -263,13 +465,15 @@ public class RandomizedSequenceTester {
                 import com.fasterxml.jackson.databind.ObjectMapper;
                 import org.junit.jupiter.api.BeforeEach;
                 import org.junit.jupiter.api.AfterEach;
+                import java.net.URI;
                 import java.util.*;
+                import java.util.Locale;
                 import java.util.concurrent.*;
-                import java.util.stream.Collectors;
 
                 public class SequenceTestFramework {
 
                     protected Client client;
+                    protected Client clientNoAuth;
                     protected WebTarget target;
                     protected final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -289,6 +493,7 @@ public class RandomizedSequenceTester {
                     @BeforeEach
                     public void setUp() {
                         client = ClientBuilder.newClient();
+                        clientNoAuth = ClientBuilder.newClient();
                         target = client.target(baseUrl);
                         state.clear();
                         createdResources.clear();
@@ -296,22 +501,28 @@ public class RandomizedSequenceTester {
 
                     @AfterEach
                     public void tearDown() {
-                        // Cleanup: delete created resources in reverse order
                         List<APICall> toDelete = new ArrayList<>(createdResources);
                         Collections.reverse(toDelete);
                         for (APICall created : toDelete) {
                             try {
-                                String deletePath = created.getPath();
-                                // Try to construct a DELETE path if the creation returned an ID
-                                target.path(deletePath).request().delete().close();
+                                String deletePath = resolveTemplateParams(created.getPath());
+                                target.path(trimLeadingSlash(deletePath)).request().delete().close();
                             } catch (Exception ignored) {
-                                // Best-effort cleanup
                             }
                         }
-
                         if (client != null) {
                             client.close();
                         }
+                        if (clientNoAuth != null) {
+                            clientNoAuth.close();
+                        }
+                    }
+
+                    protected String trimLeadingSlash(String p) {
+                        if (p != null && p.startsWith("/")) {
+                            return p.substring(1);
+                        }
+                        return p != null ? p : "";
                     }
 
                     /**
@@ -322,12 +533,10 @@ public class RandomizedSequenceTester {
 
                         for (APICall call : sequence) {
                             try {
-                                // Substitute path parameters from state
-                                String resolvedPath = resolvePathParams(call.getPath());
+                                String resolvedPath = resolveTemplateParams(call.getPath());
 
                                 long startTime = System.currentTimeMillis();
-                                Response response = executeAPICall(
-                                    new APICall(call.getMethod(), resolvedPath, call.getBody(), call.getHeaders()));
+                                Response response = executeAPICall(call, resolvedPath);
                                 long responseTime = System.currentTimeMillis() - startTime;
 
                                 SequenceResult result = new SequenceResult(
@@ -335,7 +544,6 @@ public class RandomizedSequenceTester {
                                 );
                                 results.add(result);
 
-                                // Update state based on response
                                 updateState(call, response);
 
                             } catch (Exception e) {
@@ -349,34 +557,108 @@ public class RandomizedSequenceTester {
                         return results;
                     }
 
-                    /**
-                     * Resolve path parameters using state (e.g., replace {id} with stored ID)
-                     */
-                    protected String resolvePathParams(String path) {
-                        String resolved = path;
-                        for (Map.Entry<String, Object> entry : state.entrySet()) {
-                            if (entry.getKey().endsWith("_id") && entry.getValue() != null) {
-                                resolved = resolved.replace("{id}", entry.getValue().toString());
-                                String resource = entry.getKey().replace("_id", "");
-                                resolved = resolved.replace("{" + resource + "Id}", entry.getValue().toString());
+                    protected Object resolveStateForPathParam(String name) {
+                        if (name == null) {
+                            return null;
+                        }
+                        if (state.containsKey(name)) {
+                            return state.get(name);
+                        }
+                        if (state.containsKey(name + "_id")) {
+                            return state.get(name + "_id");
+                        }
+                        String legacy = name.toLowerCase(Locale.ROOT) + "_id";
+                        for (Map.Entry<String, Object> e : state.entrySet()) {
+                            if (e.getKey().equalsIgnoreCase(legacy)) {
+                                return e.getValue();
                             }
                         }
-                        return resolved;
+                        if (state.containsKey("id")) {
+                            return state.get("id");
+                        }
+                        if (state.containsKey("locationResourceId")) {
+                            return state.get("locationResourceId");
+                        }
+                        for (Map.Entry<String, Object> e : state.entrySet()) {
+                            if (e.getKey().endsWith("_id") && e.getValue() != null) {
+                                return e.getValue();
+                            }
+                        }
+                        return null;
                     }
 
                     /**
-                     * Execute a single API call
+                     * Replace each {paramName} segment using state (e.g. {folderID} after create).
                      */
-                    protected Response executeAPICall(APICall call) {
-                        WebTarget callTarget = target.path(call.getPath());
+                    protected String resolveTemplateParams(String pathTemplate) {
+                        if (pathTemplate == null || !pathTemplate.contains("{")) {
+                            return pathTemplate;
+                        }
+                        StringBuilder sb = new StringBuilder();
+                        int i = 0;
+                        while (i < pathTemplate.length()) {
+                            int open = pathTemplate.indexOf('{', i);
+                            if (open < 0) {
+                                sb.append(pathTemplate.substring(i));
+                                break;
+                            }
+                            sb.append(pathTemplate, i, open);
+                            int close = pathTemplate.indexOf('}', open + 1);
+                            if (close < 0) {
+                                sb.append(pathTemplate.substring(open));
+                                break;
+                            }
+                            String name = pathTemplate.substring(open + 1, close);
+                            Object v = resolveStateForPathParam(name);
+                            if (v != null) {
+                                sb.append(v);
+                            } else {
+                                sb.append("{").append(name).append("}");
+                            }
+                            i = close + 1;
+                        }
+                        return sb.toString();
+                    }
 
-                        // Add headers
+                    protected void captureLocationState(Response response) {
+                        if (response == null || response.getStatus() < 200 || response.getStatus() >= 300) {
+                            return;
+                        }
+                        URI loc = response.getLocation();
+                        if (loc == null) {
+                            return;
+                        }
+                        String pathPart = loc.getPath();
+                        if (pathPart == null || pathPart.isEmpty()) {
+                            return;
+                        }
+                        int slash = pathPart.lastIndexOf('/');
+                        String lastSegment = slash >= 0 ? pathPart.substring(slash + 1) : pathPart;
+                        if (lastSegment.isEmpty()) {
+                            return;
+                        }
+                        state.putIfAbsent("locationResourceId", lastSegment);
+                        state.putIfAbsent("id", lastSegment);
+                %s
+                    }
+
+                    /**
+                     * Execute a single API call (resolved path, query params, optional unauthenticated client).
+                     */
+                    protected Response executeAPICall(APICall call, String resolvedPath) {
+                        Client activeClient = call.isNoAuth() ? clientNoAuth : client;
+                        WebTarget root = activeClient.target(baseUrl);
+                        WebTarget callTarget = root.path(trimLeadingSlash(resolvedPath));
+                        for (Map.Entry<String, String> qp : call.getQueryParams().entrySet()) {
+                            callTarget = callTarget.queryParam(qp.getKey(), qp.getValue());
+                        }
+
                         jakarta.ws.rs.client.Invocation.Builder builder = callTarget.request(MediaType.APPLICATION_JSON);
                         for (Map.Entry<String, String> header : call.getHeaders().entrySet()) {
                             builder = builder.header(header.getKey(), header.getValue());
                         }
 
-                        switch (call.getMethod().toUpperCase()) {
+                        switch (call.getMethod().toUpperCase(Locale.ROOT)) {
                             case "GET":
                                 return builder.get();
                             case "POST":
@@ -407,22 +689,30 @@ public class RandomizedSequenceTester {
                      */
                     protected void updateState(APICall call, Response response) {
                         int status = response.getStatus();
+                        if (status >= 200 && status < 300) {
+                            captureLocationState(response);
+                        }
                         if ((status >= 200 && status < 300) && response.hasEntity()) {
                             String responseBody = response.readEntity(String.class);
 
                             state.put("last_response", responseBody);
                             state.put("last_status", status);
 
-                            // Extract ID from response using Jackson
                             String extractedId = extractIdFromResponse(responseBody);
 
-                            // Dynamic state extraction based on API endpoints
+                            if (extractedId != null) {
+                                state.putIfAbsent("id", extractedId);
                 %s
+                            }
 
-                            // Track created resources for cleanup
-                            if ("POST".equalsIgnoreCase(call.getMethod()) && status == 201 && extractedId != null) {
-                                String deletePath = call.getPath() + "/" + extractedId;
-                                createdResources.add(new APICall("DELETE", deletePath, null, null));
+                            if ("POST".equalsIgnoreCase(call.getMethod()) && (status == 201 || status == 200) && extractedId != null) {
+                                String deletePath = call.getPath();
+                                if (!deletePath.endsWith("/")) {
+                                    deletePath = deletePath + "/" + extractedId;
+                                } else {
+                                    deletePath = deletePath + extractedId;
+                                }
+                                createdResources.add(new APICall("DELETE", deletePath, null, null, Collections.emptyMap(), -1, false));
                             }
                         }
                     }
@@ -474,12 +764,14 @@ public class RandomizedSequenceTester {
                                 return false;
                             }
 
-                            // Validate expected status codes by method
                             if (result.getResponse() != null) {
                                 int status = result.getResponse().getStatus();
-                                // Any 2xx or expected 4xx is acceptable in sequence testing
                                 if (status >= 500) {
-                                    return false; // Server errors are always failures
+                                    return false;
+                                }
+                                APICall call = result.getCall();
+                                if (call.getExpectedStatus() >= 0 && status != call.getExpectedStatus()) {
+                                    return false;
                                 }
                             }
                         }
@@ -495,18 +787,29 @@ public class RandomizedSequenceTester {
                         private final String path;
                         private final Object body;
                         private final Map<String, String> headers;
+                        private final Map<String, String> queryParams;
+                        /** When non-negative, response status must match; -1 means any non-server-error (not 5xx). */
+                        private final int expectedStatus;
+                        private final boolean noAuth;
 
-                        public APICall(String method, String path, Object body, Map<String, String> headers) {
+                        public APICall(String method, String path, Object body, Map<String, String> headers,
+                                       Map<String, String> queryParams, int expectedStatus, boolean noAuth) {
                             this.method = method;
                             this.path = path;
                             this.body = body;
                             this.headers = headers != null ? headers : new HashMap<>();
+                            this.queryParams = queryParams != null ? queryParams : Collections.emptyMap();
+                            this.expectedStatus = expectedStatus;
+                            this.noAuth = noAuth;
                         }
 
                         public String getMethod() { return method; }
                         public String getPath() { return path; }
                         public Object getBody() { return body; }
                         public Map<String, String> getHeaders() { return headers; }
+                        public Map<String, String> getQueryParams() { return queryParams; }
+                        public int getExpectedStatus() { return expectedStatus; }
+                        public boolean isNoAuth() { return noAuth; }
                     }
 
                     /**
@@ -535,7 +838,7 @@ public class RandomizedSequenceTester {
                         public String getErrorMessage() { return errorMessage; }
                     }
                 }
-                """.formatted(baseUrl, stateExtraction.toString(), Constants.DEFAULT_MAX_RESPONSE_TIME_MS);
+                """.formatted(baseUrl, locationBootstrap.toString(), bodyIdBootstrap.toString(), Constants.DEFAULT_MAX_RESPONSE_TIME_MS);
 
         Files.write(Paths.get(outputDir, "SequenceTestFramework.java"), framework.getBytes());
     }
@@ -555,14 +858,46 @@ public class RandomizedSequenceTester {
 
                     private final Random random;
                     private final List<APICall> availableCalls;
+                    private final List<List<APICall>> scenarioTemplates;
 
                     public RandomSequenceGenerator(List<APICall> availableCalls) {
-                        this(availableCalls, System.currentTimeMillis());
+                        this(availableCalls, Collections.emptyList(), System.currentTimeMillis());
                     }
 
                     public RandomSequenceGenerator(List<APICall> availableCalls, long seed) {
+                        this(availableCalls, Collections.emptyList(), seed);
+                    }
+
+                    public RandomSequenceGenerator(List<APICall> availableCalls, List<List<APICall>> scenarioTemplates) {
+                        this(availableCalls, scenarioTemplates, System.currentTimeMillis());
+                    }
+
+                    public RandomSequenceGenerator(List<APICall> availableCalls, List<List<APICall>> scenarioTemplates, long seed) {
                         this.availableCalls = availableCalls;
+                        this.scenarioTemplates = scenarioTemplates != null ? scenarioTemplates : Collections.emptyList();
                         this.random = new Random(seed);
+                    }
+
+                    /**
+                     * Random sequence that often injects full Integrated-sheet scenario templates.
+                     */
+                    public List<APICall> generateScenarioBiasedSequence(int maxLength, double scenarioWeight) {
+                        List<APICall> sequence = new ArrayList<>();
+                        int targetLen = random.nextInt(Math.max(1, maxLength)) + 1;
+                        while (sequence.size() < targetLen) {
+                            if (!scenarioTemplates.isEmpty() && random.nextDouble() < scenarioWeight) {
+                                List<APICall> template = scenarioTemplates.get(random.nextInt(scenarioTemplates.size()));
+                                for (APICall step : template) {
+                                    if (sequence.size() >= targetLen) {
+                                        break;
+                                    }
+                                    sequence.add(step);
+                                }
+                            } else {
+                                sequence.add(availableCalls.get(random.nextInt(availableCalls.size())));
+                            }
+                        }
+                        return sequence;
                     }
 
                     /**
@@ -701,16 +1036,12 @@ public class RandomizedSequenceTester {
         // Build the initializeAPICalls method body from actual spec
         StringBuilder initBody = new StringBuilder();
         for (APICallInfo call : apiCalls) {
-            String body = "null";
-            if (call.hasRequestBody) {
-                String mockBody = buildRequestBodyForOperation(call.operation, spec);
-                body = mockBody != null ? "\"" + mockBody + "\"" : "null";
-            }
-            initBody.append("            calls.add(new APICall(\"")
-                    .append(call.method).append("\", \"")
-                    .append(call.path).append("\", ")
-                    .append(body).append(", null));\n");
+            initBody.append("            calls.add(");
+            appendAPICallConstructor(initBody, "", "APICall", call, spec, null, -1, false);
+            initBody.append(");\n");
         }
+
+        IntegratedScenarioCodegen integrated = buildIntegratedScenarioCodegen(spec, apiCalls);
 
         // Build dependency map from spec
         Map<String, List<String>> dependencies = inferDependencies(apiCalls);
@@ -750,6 +1081,17 @@ public class RandomizedSequenceTester {
                     .append("\", ").append(weight).append(");\n");
         }
 
+        String biasedBlock = """
+
+                    @Test
+                    public void testScenarioBiasedSequence() {
+                        List<APICall> sequence = generator.generateScenarioBiasedSequence(10, 0.45);
+                        List<SequenceResult> results = executeSequence(sequence);
+                        assertTrue(validateSequenceResults(results),
+                            "Scenario-biased RST should satisfy validation");
+                    }
+                """;
+
         String testCases = """
                 package com.example.sequence;
 
@@ -769,12 +1111,13 @@ public class RandomizedSequenceTester {
 
                     private List<APICall> availableCalls;
                     private RandomSequenceGenerator generator;
+                %s
 
                     @BeforeEach
                     public void setUp() {
                         super.setUp();
                         availableCalls = initializeAPICalls();
-                        generator = new RandomSequenceGenerator(availableCalls);
+                        generator = new RandomSequenceGenerator(availableCalls, %s);
                     }
 
                     @Test
@@ -859,6 +1202,7 @@ public class RandomizedSequenceTester {
                         assertTrue(totalTime < 30000,
                             "100 sequences should complete in less than 30 seconds");
                     }
+                %s
 
                     /**
                      * Initialize API calls from OpenAPI specification endpoints
@@ -870,8 +1214,14 @@ public class RandomizedSequenceTester {
                         return calls;
                     }
                 }
-                """.formatted(weightsBody.toString(), depsBody.toString(),
-                stateBody.toString(), initBody.toString());
+                """.formatted(
+                integrated.helperMethods(),
+                integrated.scenarioTemplateListExpr(),
+                weightsBody.toString(),
+                depsBody.toString(),
+                stateBody.toString(),
+                integrated.testMethods() + biasedBlock,
+                initBody.toString());
 
         Files.write(Paths.get(outputDir, "SequenceTestCases.java"), testCases.getBytes());
     }
@@ -917,15 +1267,9 @@ public class RandomizedSequenceTester {
         // Build init body from spec
         StringBuilder initBody = new StringBuilder();
         for (APICallInfo call : apiCalls) {
-            String body = "null";
-            if (call.hasRequestBody) {
-                String mockBody = buildRequestBodyForOperation(call.operation, spec);
-                body = mockBody != null ? "\"" + mockBody + "\"" : "null";
-            }
-            initBody.append("            calls.add(new SequenceTestFramework.APICall(\"")
-                    .append(call.method).append("\", \"")
-                    .append(call.path).append("\", ")
-                    .append(body).append(", null));\n");
+            initBody.append("            calls.add(");
+            appendAPICallConstructor(initBody, "", "SequenceTestFramework.APICall", call, spec, null, -1, false);
+            initBody.append(");\n");
         }
 
         String config = """
@@ -968,5 +1312,202 @@ public class RandomizedSequenceTester {
         boolean hasPathParams;
         boolean hasRequestBody;
         Map<String, Object> operation;
+        List<String> pathParamNames = List.of();
+        Map<String, String> defaultQueryParams = Map.of();
+    }
+
+    private record IntegratedScenarioCodegen(
+            String helperMethods,
+            String testMethods,
+            String scenarioTemplateListExpr) {
+    }
+
+    private IntegratedScenarioCodegen buildIntegratedScenarioCodegen(
+            Map<String, Object> spec, List<APICallInfo> apiCalls) {
+        StringBuilder helpers = new StringBuilder();
+        StringBuilder tests = new StringBuilder();
+        List<String> templateRefs = new ArrayList<>();
+
+        APICallInfo createFolder = findByOperationId(apiCalls, "createFolder");
+        APICallInfo getFolder = findByOperationId(apiCalls, "getFolder");
+        APICallInfo editFolder = findByOperationId(apiCalls, "editFolder");
+        APICallInfo deleteFolder = findByOperationId(apiCalls, "deleteFolder");
+        APICallInfo copyFolder = findByOperationIdContains(apiCalls, "copy");
+        APICallInfo moveFolder = findByOperationIdContains(apiCalls, "move");
+        APICallInfo permFolder = findByOperationIdContains(apiCalls, "ermission");
+
+        emitScenarioIfPresent(helpers, tests, templateRefs, spec, "createAndGet",
+                "Integrated: create and get", Arrays.asList(createFolder, getFolder),
+                Arrays.asList(null, null), Arrays.asList(-1, -1), Arrays.asList(false, false));
+
+        emitScenarioIfPresent(helpers, tests, templateRefs, spec, "editAndGet",
+                "Integrated: edit and get", Arrays.asList(createFolder, editFolder, getFolder),
+                Arrays.asList(null, null, null), Arrays.asList(-1, -1, -1), Arrays.asList(false, false, false));
+
+        emitScenarioIfPresent(helpers, tests, templateRefs, spec, "deleteAndGet",
+                "Integrated: delete folder and get", Arrays.asList(createFolder, deleteFolder, getFolder),
+                Arrays.asList(null, null, null), Arrays.asList(-1, -1, -1), Arrays.asList(false, false, false));
+
+        if (permFolder != null && getFolder != null) {
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "editPermissionsAndGet",
+                    "Integrated: edit permissions and get", Arrays.asList(createFolder, permFolder, getFolder),
+                    Arrays.asList(null, null, null), Arrays.asList(-1, -1, -1), Arrays.asList(false, false, false));
+        } else {
+            emitDisabledScenario(tests, "editPermissionsAndGet",
+                    "No folder permission-edit operation found in spec (Integrated sheet: edit permissions and get).");
+        }
+
+        if (copyFolder != null && getFolder != null && createFolder != null) {
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "copyFolderAndGet",
+                    "Integrated: copy folder and get", Arrays.asList(createFolder, copyFolder, getFolder),
+                    Arrays.asList(null, null, null), Arrays.asList(-1, -1, -1), Arrays.asList(false, false, false));
+        } else {
+            emitDisabledScenario(tests, "copyFolderAndGet",
+                    "No copy-folder operation found in spec (Integrated sheet: Copy folder and get).");
+        }
+
+        if (moveFolder != null && getFolder != null && createFolder != null) {
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "moveFolderAndGet",
+                    "Integrated: move folder and get", Arrays.asList(createFolder, moveFolder, getFolder),
+                    Arrays.asList(null, null, null), Arrays.asList(-1, -1, -1), Arrays.asList(false, false, false));
+        } else {
+            emitDisabledScenario(tests, "moveFolderAndGet",
+                    "No move-folder operation found in spec (Integrated sheet: Move folder and get).");
+        }
+
+        emitDisabledScenario(tests, "getUsingDifferentUser",
+                "Requires a second authenticated client; configure alternate token in generated framework (Integrated: get using different user).");
+        emitDisabledScenario(tests, "editUsingDifferentUserThanCreateAndGet",
+                "Requires two distinct user contexts (Integrated: edit using different user than create and get).");
+
+        if (createFolder != null && getFolder != null) {
+            Map<String, String> langQuery = pickQueryParamsMatching(getFolder, "lang");
+            if (langQuery.isEmpty()) {
+                langQuery = Map.of("$lang", "en-US");
+            }
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "queryLangPositive",
+                    "Integrated: validate query $lang", Arrays.asList(createFolder, getFolder),
+                    Arrays.asList(null, langQuery), Arrays.asList(-1, -1), Arrays.asList(false, false));
+
+            Map<String, String> levelQuery = pickQueryParamsMatching(getFolder, "level");
+            if (levelQuery.isEmpty()) {
+                levelQuery = Map.of("$level", "0");
+            }
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "queryLevelPositive",
+                    "Integrated: validate query $level", Arrays.asList(createFolder, getFolder),
+                    Arrays.asList(null, levelQuery), Arrays.asList(-1, -1), Arrays.asList(false, false));
+
+            Map<String, String> sortOrder = new LinkedHashMap<>(pickQueryParamsMatching(getFolder, "sort"));
+            sortOrder.putAll(pickQueryParamsMatching(getFolder, "order"));
+            if (sortOrder.isEmpty()) {
+                sortOrder.put("$sort", "name");
+                sortOrder.put("$order", "asc");
+            }
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "querySortOrderPositive",
+                    "Integrated: validate $sort and $order", Arrays.asList(createFolder, getFolder),
+                    Arrays.asList(null, sortOrder), Arrays.asList(-1, -1), Arrays.asList(false, false));
+
+            Map<String, String> pageQuery = new LinkedHashMap<>();
+            pageQuery.putAll(pickQueryParamsMatching(getFolder, "page"));
+            if (pageQuery.isEmpty()) {
+                pageQuery.put("$pagenum", "1");
+                pageQuery.put("$pagesize", "10");
+            }
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "queryPaginationPositive",
+                    "Integrated: validate $pagenum and $pagesize", Arrays.asList(createFolder, getFolder),
+                    Arrays.asList(null, pageQuery), Arrays.asList(-1, -1), Arrays.asList(false, false));
+        }
+
+        if (getFolder != null && createFolder != null) {
+            emitScenarioIfPresent(helpers, tests, templateRefs, spec, "expect401",
+                    "Integrated: validate 401 without credentials", Arrays.asList(createFolder, getFolder),
+                    Arrays.asList(null, null), Arrays.asList(-1, 401), Arrays.asList(false, true));
+            emitDisabledScenario(tests, "expect403",
+                    "Enable when running with a token missing required scope (Integrated: validate 403). Set system property egain.sequence.run403=true and use an insufficient-scope token.");
+        } else {
+            emitDisabledScenario(tests, "expect401",
+                    "createFolder and getFolder required for unauthenticated GET scenario.");
+            emitDisabledScenario(tests, "expect403", "getFolder operation not present in spec.");
+        }
+
+        String listExpr;
+        if (templateRefs.isEmpty()) {
+            listExpr = "Collections.emptyList()";
+        } else {
+            listExpr = templateRefs.stream()
+                    .map(n -> "scenario" + n + "()")
+                    .collect(Collectors.joining(", ", "Arrays.asList(", ")"));
+        }
+        return new IntegratedScenarioCodegen(helpers.toString(), tests.toString(), listExpr);
+    }
+
+    private Map<String, String> pickQueryParamsMatching(APICallInfo getOp, String needle) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (getOp == null) {
+            return out;
+        }
+        String n = needle.toLowerCase(ROOT);
+        for (Map.Entry<String, String> e : getOp.defaultQueryParams.entrySet()) {
+            if (e.getKey().toLowerCase(ROOT).contains(n)) {
+                out.put(e.getKey(), e.getValue());
+            }
+        }
+        return out;
+    }
+
+    private void emitDisabledScenario(StringBuilder tests, String methodSuffix, String reason) {
+        tests.append("    @org.junit.jupiter.api.Disabled(\"")
+                .append(escapeJavaStringLiteral(reason))
+                .append("\")\n    @Test\n    void testScenario_")
+                .append(methodSuffix)
+                .append("() {\n    }\n\n");
+    }
+
+    private void emitScenarioIfPresent(
+            StringBuilder helpers,
+            StringBuilder tests,
+            List<String> templateRefs,
+            Map<String, Object> spec,
+            String methodSuffix,
+            String displayComment,
+            List<APICallInfo> calls,
+            List<Map<String, String>> queryOverrides,
+            List<Integer> expectedStatuses,
+            List<Boolean> noAuthFlags) {
+        if (calls.stream().anyMatch(Objects::isNull)) {
+            emitDisabledScenario(tests, methodSuffix,
+                    "One or more operations missing from OpenAPI spec for scenario: " + displayComment);
+            return;
+        }
+        queryOverrides = new ArrayList<>(queryOverrides);
+        expectedStatuses = new ArrayList<>(expectedStatuses);
+        noAuthFlags = new ArrayList<>(noAuthFlags);
+        while (queryOverrides.size() < calls.size()) {
+            queryOverrides.add(null);
+        }
+        while (expectedStatuses.size() < calls.size()) {
+            expectedStatuses.add(-1);
+        }
+        while (noAuthFlags.size() < calls.size()) {
+            noAuthFlags.add(false);
+        }
+
+        String capSuffix = methodSuffix.substring(0, 1).toUpperCase(ROOT) + methodSuffix.substring(1);
+        templateRefs.add(capSuffix);
+        helpers.append("    /** ").append(escapeJavaStringLiteral(displayComment)).append(" */\n");
+        helpers.append("    private List<APICall> scenario").append(capSuffix).append("() {\n");
+        helpers.append("        return Arrays.asList(\n");
+        for (int i = 0; i < calls.size(); i++) {
+            helpers.append("            ");
+            appendAPICallConstructor(helpers, "", "APICall", calls.get(i), spec, queryOverrides.get(i), expectedStatuses.get(i), noAuthFlags.get(i));
+            helpers.append(i < calls.size() - 1 ? ",\n" : "\n");
+        }
+        helpers.append("        );\n    }\n\n");
+
+        tests.append("    @Test\n    void testScenario_").append(methodSuffix).append("() {\n");
+        tests.append("        assertTrue(validateSequenceResults(executeSequence(scenario")
+                .append(capSuffix).append("())), \"")
+                .append(escapeJavaStringLiteral(displayComment))
+                .append("\");\n    }\n\n");
     }
 }

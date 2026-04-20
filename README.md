@@ -2165,6 +2165,10 @@ For support and questions:
   - [x] PATCH/HEAD/OPTIONS support
   - [x] Automatic cleanup/teardown sequences
   - [x] Seed-based reproducibility
+  - [x] Path templates (`{folderID}`, and so on), query maps, per-call expected HTTP status, optional unauthenticated client
+  - [x] `Location` header and JSON body ID extraction into state for chained calls
+  - [x] Integrated-style scenario tests and `generateScenarioBiasedSequence` in generated `RandomSequenceGenerator`
+  - [x] `egain.oassdk.examples.GenerateRstFromPublishedSpec`: parse + resolve `$ref` with a search root, emit RST sources (use env `RST_SPEC_PATH`, `RST_SEARCH_ROOT`, `RST_OUTPUT_DIR`, optional `RST_BASE_URL`, then `mvn exec:java`; avoids shell quoting issues)
 - [x] Enhanced test generation
   - [x] Schema-derived request bodies in integration tests
   - [x] Response schema validation (required fields, type checks)
