@@ -33,10 +33,24 @@ class SchemathesisTestGeneratorTest {
         assertTrue(props.contains("%HUB%"));
         assertTrue(props.contains("JUNIT_REPORT="));
         assertTrue(props.contains("%TOKEN%"));
+        assertTrue(props.contains("TLS_VERIFY=false"));
 
         String script = Files.readString(bundle.resolve("run-schemathesis.sh"));
         assertTrue(script.contains("st run"));
         assertTrue(script.contains("--phases="));
+        assertTrue(script.contains("--tls-verify=false"));
+    }
+
+    @Test
+    void tlsVerifyTrueOmitsInsecureFlag(@TempDir Path tempDir) throws GenerationException, IOException {
+        Map<String, Object> spec = minimalSpec();
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("schemathesis.tlsVerify", "true");
+        TestConfig config = TestConfig.builder().additionalProperties(extra).build();
+        new SchemathesisTestGenerator().generate(spec, tempDir.toString(), config, null);
+
+        String props = Files.readString(tempDir.resolve("schemathesis").resolve("schemathesis.properties"));
+        assertTrue(props.contains("TLS_VERIFY=true"));
     }
 
     @Test
