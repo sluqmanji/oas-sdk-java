@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -31,6 +32,9 @@ import java.util.Objects;
  *   <li>{@code schemathesis.junitReport}, {@code schemathesis.vcrPath}, {@code schemathesis.consoleLog},
  *       {@code schemathesis.coverageDir}, {@code schemathesis.rateLimit}, {@code schemathesis.checks},
  *       {@code schemathesis.mode}, {@code schemathesis.phases}, {@code schemathesis.extraArgs}</li>
+ *   <li>{@code schemathesis.tlsVerify} — {@code true} verifies HTTPS certificates (use for CI/production);
+ *       {@code false} or omitted emits {@code TLS_VERIFY=false} and passes {@code --tls-verify=false}
+ *       to {@code st run} (local/dev only; default when this key is omitted)</li>
  * </ul>
  */
 public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTestGenerator {
@@ -122,14 +126,28 @@ public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTes
         m.put("HEADER_ACCEPT_LANG", propString(config, "schemathesis.headerAcceptLanguage", "Accept-language: en-US"));
         m.put("HEADER_AUTH", propString(config, "schemathesis.headerAuthorization", "Authorization: %TOKEN%"));
         m.put("EXTRA_ARGS", propString(config, "schemathesis.extraArgs", "").trim());
+        m.put("TLS_VERIFY", tlsVerifyPropertyString(config));
         return m;
+    }
+
+    /**
+     * {@code true}/{@code false} for {@code TLS_VERIFY} in properties; default {@code false} so generated
+     * bundles work against typical dev/self-signed hosts (set {@code schemathesis.tlsVerify=true} for CI).
+     */
+    private static String tlsVerifyPropertyString(TestConfig config) {
+        String v = propString(config, "schemathesis.tlsVerify", "false").trim().toLowerCase(Locale.ROOT);
+        if ("true".equals(v) || "1".equals(v) || "yes".equals(v)) {
+            return "true";
+        }
+        return "false";
     }
 
     private static void writeProperties(Path path, Map<String, String> values) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("# Schemathesis run configuration.\n");
         sb.append("# Jenkins/CI may replace tokens like %HUB%, %DOT%, %BUILD_NUMBER%, %BASEURL%, %TOKEN%.\n");
-        sb.append("# For local runs, copy to schemathesis.local.properties (key=value) and export overrides.\n\n");
+        sb.append("# For local runs, copy to schemathesis.local.properties (key=value) and export overrides.\n");
+        sb.append("# TLS_VERIFY=false passes --tls-verify=false (dev/self-signed only); use true in production/CI.\n\n");
         for (Map.Entry<String, String> e : values.entrySet()) {
             sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
         }
@@ -187,6 +205,13 @@ public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTes
                 HEADER_ACCEPT_LANG="$(get_prop HEADER_ACCEPT_LANG 'Accept-language: en-US')"
                 HEADER_AUTH="$(get_prop HEADER_AUTH 'Authorization: %TOKEN%')"
                 EXTRA_ARGS="$(get_prop EXTRA_ARGS '')"
+                TLS_VERIFY="$(get_prop TLS_VERIFY 'true')"
+                tls_lc=$(printf '%s' "$TLS_VERIFY" | tr '[:upper:]' '[:lower:]')
+                if [[ -z "$tls_lc" ]]; then tls_lc=true; fi
+                TLS_EXTRA=()
+                if [[ "$tls_lc" != "true" && "$tls_lc" != "1" && "$tls_lc" != "yes" ]]; then
+                  TLS_EXTRA=(--tls-verify=false)
+                fi
                 
                 if ! command -v st >/dev/null 2>&1; then
                   echo "Schemathesis CLI (st) not found. Install: pip install schemathesis" >&2
@@ -206,8 +231,8 @@ public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTes
                   --header "$HEADER_AUTH" \\
                   --report-vcr-path="$VCR_CASSETTE" \\
                   --url="$BASEURL" \\
+                  "${TLS_EXTRA[@]}" \\
                   "$SPEC_FILE" \\
-                  --coverage-format=html \\
                   $EXTRA_ARGS \\
                   2>&1 | tee "$CONSOLE_LOG"
                 """.replace("__SCHEMA_FILE__", specFile);
@@ -226,7 +251,7 @@ public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTes
                 
                 - `openapi.yaml` — OpenAPI document used by Schemathesis (from the SDK parse/filter pipeline).
                 - `schemathesis.properties` — paths and options; CI placeholders such as `%BASEURL%`, `%TOKEN%`, `%HUB%`, `%DOT%`, `%BUILD_NUMBER%` are left literal for your build server to replace.
-                - `run-schemathesis.sh` — runs `st run` with coverage, JUnit, and VCR outputs.
+                - `run-schemathesis.sh` — runs `st run` with JUnit and VCR outputs; honors `TLS_VERIFY` (default in bundle: verify off for dev via `--tls-verify=false`; set `TLS_VERIFY=true` for production).
                 - Optional `schemathesis.local.properties` — shell-sourced before the run; use for local secrets (do not commit).
                 
                 ## Run
@@ -237,6 +262,7 @@ public class SchemathesisTestGenerator implements TestGenerator, ConfigurableTes
                 ```
                 
                 Override defaults by editing `schemathesis.properties` or providing `schemathesis.local.properties`.
+                Set `TLS_VERIFY=true` when targeting environments with proper TLS trust stores.
                 """;
     }
 

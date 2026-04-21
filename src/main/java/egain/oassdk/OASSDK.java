@@ -653,7 +653,7 @@ public class OASSDK implements AutoCloseable {
             // Generate tests
             if (testConfig != null) {
                 generateTests(
-                        List.of("unit", "integration", "nfr"),
+                        List.of("unit", "integration", "nfr", "performance", "security", "postman", "schemathesis"),
                         outputDir + "/tests"
                 );
 
