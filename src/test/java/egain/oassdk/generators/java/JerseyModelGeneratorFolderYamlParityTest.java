@@ -76,6 +76,44 @@ class JerseyModelGeneratorFolderYamlParityTest {
                 "CreateFolder oneOf XOR validation block should match golden fragment (Folder.yaml / createFolder).");
     }
 
+    @Test
+    @DisplayName("Bundled Permission.yaml EditFolderPermissionsEntry.identity maps to IdentityPayload (not Object)")
+    void editFolderPermissionsEntryIdentityStronglyTyped() throws OASSDKException, IOException {
+        Path specPath = Path.of("src/test/resources/folder_contentmgr_bundle/knowledge/models/contentmgr/v4/Folder.yaml")
+                .toAbsolutePath();
+        assertTrue(Files.isRegularFile(specPath), "Missing bundled spec: " + specPath);
+
+        Path bundleRoot = Path.of("src/test/resources/folder_contentmgr_bundle").toAbsolutePath();
+        Path outputDir = tempOutputDir.resolve("folder-models-identity");
+        GeneratorConfig config = GeneratorConfig.builder()
+                .modelsOnly(true)
+                .packageName("com.egain.bindings.ws.model.xsds.common.v4.content")
+                .outputDir(outputDir.toString())
+                .searchPaths(List.of(bundleRoot.toString()))
+                .build();
+
+        try (OASSDK sdk = new OASSDK(config, null, null)) {
+            sdk.loadSpec(specPath.toString());
+            sdk.generateApplication("java", "jersey", config.getPackageName(), outputDir.toString());
+        }
+
+        Path entryJava;
+        try (Stream<Path> walk = Files.walk(outputDir)) {
+            entryJava = walk
+                    .filter(p -> p.getFileName().toString().equals("EditFolderPermissionsEntry.java"))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("EditFolderPermissionsEntry.java not found under " + outputDir));
+        }
+
+        String generated = Files.readString(entryJava, StandardCharsets.UTF_8);
+        assertTrue(
+                generated.contains("private IdentityPayload identity"),
+                "identity should be IdentityPayload (allOf[$ref] preserves type after oneOf inlining); got snippet around identity field");
+        assertTrue(
+                !generated.contains("private Object identity"),
+                "identity must not degrade to Object after parser inlines IdentityPayload oneOf");
+    }
+
     private static String readResource(String classpathPath) throws IOException {
         try (InputStream in = JerseyModelGeneratorFolderYamlParityTest.class.getResourceAsStream(classpathPath)) {
             Objects.requireNonNull(in, "Missing classpath resource: " + classpathPath);

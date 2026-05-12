@@ -111,7 +111,8 @@ components:
         - permission
       properties:
         identity:
-          $ref: '#/components/schemas/IdentityPayload'
+          allOf:
+            - $ref: '#/components/schemas/IdentityPayload'
         permission:
           type: array
           description: Array of permission being assigned to identity
