@@ -45,7 +45,7 @@ java -jar target/oas-sdk-java-*-shaded.jar generate --spec path/to/openapi.yaml 
 
 **Single-module Maven project** (Java 21, packaging: jar) with these key packages under `egain.oassdk`:
 
-- **`cli`** — PicoCLI-based CLI entry point (`OASSDKCLI`). Commands: `generate`, `tests`, `validate`, `docs`, `all`.
+- **`cli`** — PicoCLI-based CLI entry point (`OASSDKCLI`, command name `oas-sdk`). Subcommands: `generate`, `tests`, `mockdata`, `sla`, `all`, `validate`, `info`.
 - **`config`** — Configuration classes with Builder pattern: `GeneratorConfig`, `TestConfig`, `SLAConfig`, `ObservabilityConfig`.
 - **`core`** — OpenAPI parsing (`OASParser`), validation (`OASValidator`), metadata extraction (`OASMetadata`). Parser handles external `$ref` resolution and ZIP-based spec loading. **`core.io`** — `OpenApiMapYamlWriter` for serializing parsed spec maps to YAML (e.g. Schemathesis bundles).
 - **`generators`** — Code generation via Factory + Strategy pattern:
@@ -54,7 +54,7 @@ java -jar target/oas-sdk-java-*-shaded.jar generate --spec path/to/openapi.yaml 
   - `generators.python` — FastAPI and Flask generators
   - `generators.nodejs` — Express generator
   - `generators.go`, `generators.csharp` — Stubs
-- **`testgenerators`** — Test generation via `TestGeneratorFactory`. Subtypes: `unit`, `integration`, `nfr`, `performance`, `security`, `postman`, `schemathesis`, `mock`.
+- **`testgenerators`** — Test generation via `TestGeneratorFactory`. Subtypes: `unit`, `integration`, `nfr`, `performance`, `security`, `postman`, `schemathesis`, `sequence`, `mockdata` (alias `mock_data`). Each subtype is its own subpackage with per-language implementations where applicable (java, python, nodejs).
 - **`docs`** — Documentation generation (Swagger UI, Markdown, FreeMarker templates).
 - **`sla`** — SLA enforcement: rate limiting, API gateway policies, Prometheus/Grafana monitoring.
 - **`connectors`** — Runtime helpers pulled into generated apps: `APIValidator`, `RateLimiter`, `StaticLimitChecker`, `SLAMonitoringController`, `BusinessLogicConnector`.
