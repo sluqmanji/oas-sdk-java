@@ -78,6 +78,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // models-only mode, so the egain.ws.oas package is present in every generated output.
             validationGenerator.generateSupportClasses();
 
+            // The egain.framework.validation runtime framework (ValidatorAction, Validator,
+            // ValidationError, builders, L10NResource) is likewise always emitted.
+            new JerseyValidationFrameworkGenerator(ctx).generate();
+
             if (!isModelsOnly) {
                 JerseyBuildGenerator buildGenerator = new JerseyBuildGenerator(ctx);
                 buildGenerator.generateMainApplicationClass(spec, outputDir, packageName);
