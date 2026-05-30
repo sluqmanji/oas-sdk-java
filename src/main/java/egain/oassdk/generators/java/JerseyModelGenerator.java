@@ -35,6 +35,18 @@ class JerseyModelGenerator {
                 && "true".equals(String.valueOf(ctx.config.getAdditionalProperties().get("standaloneMode")));
     }
 
+    /**
+     * Emit an {@code @Override} line for a JAXBBean interface method (getAttribute, setAttribute,
+     * isSetAttribute, getAttributeNames) — but only in non-standalone mode. In standalone mode the
+     * proprietary {@code JAXBBean} interface is not generated and the class does not implement it,
+     * so these methods override nothing and {@code @Override} would fail to compile.
+     */
+    private void appendJaxbBeanOverride(StringBuilder content, String indent) {
+        if (!isStandaloneMode()) {
+            content.append(indent).append("@Override\n");
+        }
+    }
+
     private boolean legacyXorNestedIdAsserts() {
         return ctx.config != null && ctx.config.isLegacyXorNestedIdAsserts();
     }
@@ -1022,7 +1034,7 @@ class JerseyModelGenerator {
             content.append(indentBody).append("}\n\n");
         }
 
-        content.append(indentBody).append("@Override\n");
+        appendJaxbBeanOverride(content, indentBody);
         content.append(indentBody).append("public Object getAttribute(String name) {\n");
         for (String fn : fieldNames) {
             Map<String, Object> fs = Util.asStringObjectMap(allProperties.get(fn));
@@ -1034,7 +1046,7 @@ class JerseyModelGenerator {
         content.append(indentBody).append("    return null;\n");
         content.append(indentBody).append("}\n\n");
 
-        content.append(indentBody).append("@Override\n");
+        appendJaxbBeanOverride(content, indentBody);
         content.append(indentBody).append("public boolean isSetAttribute(String name) {\n");
         for (String fn : fieldNames) {
             String cap = JerseyNamingUtils.getCapitalizedPropertyNameForAccessor(JerseyNamingUtils.toModelFieldName(fn));
@@ -1043,7 +1055,7 @@ class JerseyModelGenerator {
         content.append(indentBody).append("    return false;\n");
         content.append(indentBody).append("}\n\n");
 
-        content.append(indentBody).append("@Override\n");
+        appendJaxbBeanOverride(content, indentBody);
         content.append(indentBody).append("public List<String> getAttributeNames() {\n");
         content.append(indentBody).append("    List<String> names = new ArrayList<>();\n");
         for (String fn : fieldNames) {
@@ -1052,7 +1064,7 @@ class JerseyModelGenerator {
         content.append(indentBody).append("    return names;\n");
         content.append(indentBody).append("}\n\n");
 
-        content.append(indentBody).append("@Override\n");
+        appendJaxbBeanOverride(content, indentBody);
         content.append(indentBody).append("public void setAttribute(String name, Object value) {\n");
         for (String fn : fieldNames) {
             String jf = JerseyNamingUtils.toModelFieldName(fn);
@@ -1085,7 +1097,11 @@ class JerseyModelGenerator {
 
         content.append("\n    @XmlAccessorType(XmlAccessType.FIELD)\n");
         content.append("    @XmlType(name = \"\", propOrder = {\"").append(innerJavaField).append("\"})\n");
-        content.append("    public static class ").append(w.wrapperClassName).append(" implements Serializable, JAXBBean {\n\n");
+        if (!isStandaloneMode()) {
+            content.append("    public static class ").append(w.wrapperClassName).append(" implements Serializable, JAXBBean {\n\n");
+        } else {
+            content.append("    public static class ").append(w.wrapperClassName).append(" implements Serializable {\n\n");
+        }
         content.append("        private static final long serialVersionUID = 1L;\n\n");
         content.append("        @XmlElement(name = \"").append(w.innerPropertyName).append("\")\n");
         if (typeUtils.isEligibleForCascadingValidation(w.innerPropertyName)) {
@@ -1106,25 +1122,25 @@ class JerseyModelGenerator {
         content.append("        public void unset").append(innerCapitalized).append("() {\n");
         content.append("            this.").append(innerJavaField).append(" = null;\n");
         content.append("        }\n\n");
-        content.append("        @Override\n");
+        appendJaxbBeanOverride(content, "        ");
         content.append("        public Object getAttribute(String name) {\n");
         content.append("            if (\"").append(w.innerPropertyName).append("\".equals(name)) {\n");
         content.append("                return get").append(innerCapitalized).append("();\n");
         content.append("            }\n");
         content.append("            return null;\n");
         content.append("        }\n\n");
-        content.append("        @Override\n");
+        appendJaxbBeanOverride(content, "        ");
         content.append("        public void setAttribute(String name, Object value) {\n");
         content.append("            if (\"").append(w.innerPropertyName).append("\".equals(name)) {\n");
         content.append("                get").append(innerCapitalized).append("().add((").append(w.itemTypeName).append(") value);\n");
         content.append("                return;\n");
         content.append("            }\n");
         content.append("        }\n\n");
-        content.append("        @Override\n");
+        appendJaxbBeanOverride(content, "        ");
         content.append("        public boolean isSetAttribute(String name) {\n");
         content.append("            return \"").append(w.innerPropertyName).append("\".equals(name) && isSet").append(innerCapitalized).append("();\n");
         content.append("        }\n\n");
-        content.append("        @Override\n");
+        appendJaxbBeanOverride(content, "        ");
         content.append("        public List<String> getAttributeNames() {\n");
         content.append("            List<String> names = new ArrayList<>();\n");
         content.append("            names.add(\"").append(w.innerPropertyName).append("\");\n");
