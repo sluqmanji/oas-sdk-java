@@ -10,11 +10,7 @@ import java.nio.file.Paths;
  */
 class JerseyValidationGenerator {
 
-    private static final String OAS_PACKAGE = "egain.ws.oas";
-    private static final String VALIDATION_PACKAGE = "egain.ws.oas.validation";
-
     private final JerseyGenerationContext ctx;
-    private String javaValidationDir;
 
     JerseyValidationGenerator(JerseyGenerationContext ctx) {
         this.ctx = ctx;
@@ -31,61 +27,32 @@ class JerseyValidationGenerator {
         if (outputDir == null) {
             throw new IllegalArgumentException("Output directory cannot be null");
         }
-        String validationPackage = VALIDATION_PACKAGE;
+        String validationPackage = packageName != null ? packageName : "egain.ws.oas.validation";
+        String packagePath = validationPackage.replace(".", "/");
         String sourceRoot = outputDir + (ctx.modelsOnly ? "/" : "/src/main/java/");
-        String textArtifactDir = sourceRoot + resolveV4PrefixedPath(packageName, VALIDATION_PACKAGE);
-        javaValidationDir = sourceRoot + VALIDATION_PACKAGE.replace(".", "/");
+        String validationDir = sourceRoot + packagePath;
 
-        Files.createDirectories(Paths.get(textArtifactDir));
-        Files.createDirectories(Paths.get(javaValidationDir));
+        // Ensure target directory exists
+        Files.createDirectories(Paths.get(validationDir));
 
         // Generate all validator classes
-        generateIsRequiredValidator(textArtifactDir, validationPackage);
-        generatePatternValidator(textArtifactDir, validationPackage);
-        generateMaxLengthValidator(textArtifactDir, validationPackage);
-        generateMinLengthValidator(textArtifactDir, validationPackage);
-        generateNumericMaxValidator(textArtifactDir, validationPackage);
-        generateNumericMinValidator(textArtifactDir, validationPackage);
-        generateNumericMultipleOfValidator(textArtifactDir, validationPackage);
-        generateEnumValidator(textArtifactDir, validationPackage);
-        generateBooleanValidator(textArtifactDir, validationPackage);
-        generateFormatValidator(textArtifactDir, validationPackage);
-        generateAllowedParameterValidator(textArtifactDir, validationPackage);
-        generateArrayMaxItemsValidators(textArtifactDir, validationPackage);
-        generateArrayMinItemsValidator(textArtifactDir, validationPackage);
-        generateArrayUniqueItemsValidators(textArtifactDir, validationPackage);
-        generateArraySimpleStyleValidator(textArtifactDir, validationPackage);
-        generateIsAllowEmptyValueValidator(textArtifactDir, validationPackage);
-        generateIsAllowReservedValidator(textArtifactDir, validationPackage);
-    }
-
-    private String resolveV4PrefixedPath(String packageName, String suffixPackage) {
-        if (packageName != null && !packageName.isBlank()) {
-            int searchFrom = packageName.length();
-            while (searchFrom > 0) {
-                int v4Index = packageName.lastIndexOf("v4", searchFrom - 1);
-                if (v4Index < 0) {
-                    break;
-                }
-                boolean segmentStart = v4Index == 0 || packageName.charAt(v4Index - 1) == '.';
-                int v4End = v4Index + 2;
-                boolean segmentEnd = v4End == packageName.length() || packageName.charAt(v4End) == '.';
-                if (segmentStart && segmentEnd) {
-                    return (packageName.substring(0, v4End) + "." + suffixPackage).replace(".", "/");
-                }
-                searchFrom = v4Index;
-            }
-        }
-        return suffixPackage.replace(".", "/");
-    }
-
-    private String resolveOasTextArtifactDir(String sourceRoot) {
-        return sourceRoot + resolveV4PrefixedPath(ctx.packageName, OAS_PACKAGE);
-    }
-
-    private void writeValidatorArtifacts(String textArtifactDir, String className, String content) throws IOException {
-        writeFile(textArtifactDir + "/" + className + ".txt", content);
-        writeFile(javaValidationDir + "/" + className + ".java", content);
+        generateIsRequiredValidator(validationDir, validationPackage);
+        generatePatternValidator(validationDir, validationPackage);
+        generateMaxLengthValidator(validationDir, validationPackage);
+        generateMinLengthValidator(validationDir, validationPackage);
+        generateNumericMaxValidator(validationDir, validationPackage);
+        generateNumericMinValidator(validationDir, validationPackage);
+        generateNumericMultipleOfValidator(validationDir, validationPackage);
+        generateEnumValidator(validationDir, validationPackage);
+        generateBooleanValidator(validationDir, validationPackage);
+        generateFormatValidator(validationDir, validationPackage);
+        generateAllowedParameterValidator(validationDir, validationPackage);
+        generateArrayMaxItemsValidators(validationDir, validationPackage);
+        generateArrayMinItemsValidator(validationDir, validationPackage);
+        generateArrayUniqueItemsValidators(validationDir, validationPackage);
+        generateArraySimpleStyleValidator(validationDir, validationPackage);
+        generateIsAllowEmptyValueValidator(validationDir, validationPackage);
+        generateIsAllowReservedValidator(validationDir, validationPackage);
     }
 
     /**
@@ -145,7 +112,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "IsRequiredValidator", content);
+        writeFile(outputDir + "/IsRequiredValidator.java", content);
     }
 
     /**
@@ -218,7 +185,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "PatternValidator", content);
+        writeFile(outputDir + "/PatternValidator.java", content);
     }
 
     /**
@@ -296,7 +263,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "MaxLengthValidator", content);
+        writeFile(outputDir + "/MaxLengthValidator.java", content);
     }
 
     /**
@@ -374,7 +341,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "MinLengthValidator", content);
+        writeFile(outputDir + "/MinLengthValidator.java", content);
     }
 
     /**
@@ -459,7 +426,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "NumericMaxValidator", content);
+        writeFile(outputDir + "/NumericMaxValidator.java", content);
     }
 
     /**
@@ -544,7 +511,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "NumericMinValidator", content);
+        writeFile(outputDir + "/NumericMinValidator.java", content);
     }
 
     /**
@@ -626,7 +593,7 @@ class JerseyValidationGenerator {
 
         // Replace %% with % for modulo operation
         content = content.replace("%%", "%");
-        writeValidatorArtifacts(outputDir, "NumericMultipleOfValidator", content);
+        writeFile(outputDir + "/NumericMultipleOfValidator.java", content);
     }
 
     /**
@@ -701,7 +668,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "EnumValidator", content);
+        writeFile(outputDir + "/EnumValidator.java", content);
     }
 
     /**
@@ -775,7 +742,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "BooleanValidator", content);
+        writeFile(outputDir + "/BooleanValidator.java", content);
     }
 
     /**
@@ -941,7 +908,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "FormatValidator", content);
+        writeFile(outputDir + "/FormatValidator.java", content);
     }
 
     /**
@@ -984,7 +951,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "AllowedParameterValidator", content);
+        writeFile(outputDir + "/AllowedParameterValidator.java", content);
     }
 
     /**
@@ -1043,7 +1010,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "ArrayMaxItemsValidators", content);
+        writeFile(outputDir + "/ArrayMaxItemsValidators.java", content);
     }
 
     /**
@@ -1102,7 +1069,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "ArrayMinItemsValidator", content);
+        writeFile(outputDir + "/ArrayMinItemsValidator.java", content);
     }
 
     /**
@@ -1168,7 +1135,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "ArrayUniqueItemsValidators", content);
+        writeFile(outputDir + "/ArrayUniqueItemsValidators.java", content);
     }
 
     /**
@@ -1216,7 +1183,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "ArraySimpleStyleValidator", content);
+        writeFile(outputDir + "/ArraySimpleStyleValidator.java", content);
     }
 
     /**
@@ -1270,7 +1237,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "IsAllowEmptyValueValidator", content);
+        writeFile(outputDir + "/IsAllowEmptyValueValidator.java", content);
     }
 
     /**
@@ -1318,7 +1285,7 @@ class JerseyValidationGenerator {
                 }
                 """, packageName);
 
-        writeValidatorArtifacts(outputDir, "IsAllowReservedValidator", content);
+        writeFile(outputDir + "/IsAllowReservedValidator.java", content);
     }
 
     /**
@@ -1328,10 +1295,6 @@ class JerseyValidationGenerator {
      * <p>These are emitted regardless of the {@code modelsOnly} flag — the orchestrator calls this
      * unconditionally so the support classes are always present, while the validators themselves
      * are only generated in full (non-models-only) mode.
-     *
-     * <p>For package names containing a {@code v4} segment, {@code .txt} merge artifacts are written
-     * under a v4-prefixed directory tree, while compilable {@code .java} sources always land in the
-     * fixed {@code egain/ws/oas} path so standalone builds resolve imports correctly.
      */
     public void generateSupportClasses() throws IOException {
         if (ctx.outputDir == null) {
@@ -1349,11 +1312,6 @@ class JerseyValidationGenerator {
         String validations = JerseyGenerationContext
                 .readRuntimeResource("runtime/jersey/egain/ws/oas/Validations.java");
         writeFile(supportDir + "/Validations.java", validations);
-
-        String oasTextArtifactDir = resolveOasTextArtifactDir(sourceRoot);
-        Files.createDirectories(Paths.get(oasTextArtifactDir));
-        writeFile(oasTextArtifactDir + "/RequestInfo.txt", requestInfo);
-        writeFile(oasTextArtifactDir + "/Validations.txt", validations);
     }
 
     private void writeFile(String filePath, String content) throws IOException {
