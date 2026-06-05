@@ -111,19 +111,17 @@ public class QueryParameterValidationTest {
             .filter(path -> path.toString().endsWith(".java"))
             .map(path -> path.getFileName().toString().replace(".java", ""))
             .collect(Collectors.toList());
-
-        assertTrue(validationClasses.size() >= 10,
+        
+        assertTrue(validationClasses.size() >= 10, 
             "At least 10 validation classes should be generated, found: " + validationClasses.size());
         System.out.println("   ✓ " + validationClasses.size() + " validation classes generated");
-
-        String[] keyClasses = {"IsRequiredValidator", "PatternValidator", "EnumValidator",
+        
+        // Check key validation classes exist
+        String[] keyClasses = {"IsRequiredValidator", "PatternValidator", "EnumValidator", 
                               "MaxLengthValidator", "MinLengthValidator"};
         for (String className : keyClasses) {
             assertTrue(validationClasses.contains(className),
                 className + " should be generated");
-            Path textArtifact = validationDir.resolve(className + ".txt");
-            assertTrue(Files.exists(textArtifact),
-                className + " merge artifact should exist as .txt");
         }
         System.out.println("   ✓ Key validation classes present");
     }

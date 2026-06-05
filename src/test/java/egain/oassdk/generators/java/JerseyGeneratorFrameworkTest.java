@@ -262,7 +262,7 @@ public class JerseyGeneratorFrameworkTest {
             try (var paths = Files.list(validationDir)) {
                 List<Path> validationFiles = paths
                     .filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith("Validator.txt"))
+                    .filter(p -> p.toString().endsWith("Validator.java"))
                     .limit(3) // Check first 3 validators
                     .collect(Collectors.toList());
                 
@@ -330,7 +330,7 @@ public class JerseyGeneratorFrameworkTest {
                 "ValidationMapHelper should use ValidationError (either imported or fully qualified)");
         } else {
             // If ValidationMapHelper doesn't exist, that's okay - it's only generated when needed
-            // Just verify that validation classes directory exists
+            // Just verify that validation classes directory exists.
             Path validationDir = outputDir.resolve("src/main/java/egain/ws/oas/validation");
             assertTrue(Files.exists(validationDir), "Validation directory should exist even if ValidationMapHelper is not generated");
         }
