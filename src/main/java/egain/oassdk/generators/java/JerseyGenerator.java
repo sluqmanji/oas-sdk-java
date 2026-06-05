@@ -82,6 +82,10 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
             // ValidationError, builders, L10NResource) is likewise always emitted.
             new JerseyValidationFrameworkGenerator(ctx).generate();
 
+            // The parameter validation classes (IsRequiredValidator, PatternValidator, etc.) are
+            // emitted regardless of models-only mode.
+            validationGenerator.generate();
+
             if (!isModelsOnly) {
                 JerseyBuildGenerator buildGenerator = new JerseyBuildGenerator(ctx);
                 buildGenerator.generateMainApplicationClass(spec, outputDir, packageName);
@@ -90,7 +94,6 @@ public class JerseyGenerator implements CodeGenerator, ConfigurableGenerator {
                 // Standalone builds have no eGain platform on the classpath, so emit local stubs for
                 // the authorization types (Actor/ActorType/OAuthScope) the resources reference.
                 new JerseyAuthorizationFrameworkGenerator(ctx).generate();
-                validationGenerator.generate();
 
                 buildGenerator.generateServices(outputDir, packageName);
                 buildGenerator.generateConfiguration(outputDir, packageName);
