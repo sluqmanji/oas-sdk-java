@@ -552,6 +552,18 @@ class JerseySchemaUtilsTest {
     }
 
     @Test
+    @DisplayName("allOfHasPropertyOverlayBranches is false for readOnly-only property overlay on ArticleType")
+    void allOfHasPropertyOverlayBranches_falseForReadOnlyOnlyPropertyOverlay() {
+        List<Map<String, Object>> allOf = List.of(
+                Map.of("$ref", "#/components/schemas/ArticleTypeProperties"),
+                Map.of("type", "object",
+                        "properties", Map.of(
+                                "name", Map.of("readOnly", true),
+                                "description", Map.of("readOnly", true))));
+        assertFalse(JerseySchemaUtils.allOfHasPropertyOverlayBranches(allOf));
+    }
+
+    @Test
     @DisplayName("findComponentSchemaName matches registered schema by object identity")
     void findComponentSchemaName_byIdentity() {
         Map<String, Object> identity = new LinkedHashMap<>();

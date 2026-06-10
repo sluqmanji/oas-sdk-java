@@ -560,8 +560,9 @@ public final class JerseySchemaUtils {
     }
 
     /**
-     * True when any {@code allOf} overlay branch carries a non-empty {@code properties} map
-     * (e.g. Identity id readOnly overlay). Such schemas are named compositions, not type aliases.
+     * True when any {@code allOf} overlay branch carries a semantic property overlay
+     * (e.g. Identity {@code id: { type: string, readOnly: false }}). Constraint-only overlays
+     * ({@code readOnly: true} without redefining type) do not count — those still alias to the base ref.
      */
     static boolean allOfHasPropertyOverlayBranches(List<Map<String, Object>> allOfSchemas) {
         if (allOfSchemas == null) {
@@ -572,11 +573,41 @@ public final class JerseySchemaUtils {
         partitionAllOfBranches(allOfSchemas, refBranches, overlayBranches);
         for (Map<String, Object> branch : overlayBranches) {
             Map<String, Object> props = Util.asStringObjectMap(branch.get("properties"));
-            if (props != null && !props.isEmpty()) {
+            if (props != null && !props.isEmpty() && overlayPropertiesAreSemantic(props)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** True when any property in an overlay {@code properties} map redefines type or overrides readOnly to false. */
+    private static boolean overlayPropertiesAreSemantic(Map<String, Object> props) {
+        for (Object val : props.values()) {
+            if (isSemanticPropertyOverlay(Util.asStringObjectMap(val))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when a property overlay schema carries semantic identity ({@code type}, {@code $ref}, etc.)
+     * or explicitly sets {@code readOnly: false} to override a read-only base field.
+     */
+    private static boolean isSemanticPropertyOverlay(Map<String, Object> propSchema) {
+        if (propSchema == null || propSchema.isEmpty()) {
+            return false;
+        }
+        if (propSchema.containsKey("type") || propSchema.containsKey("$ref")
+                || propSchema.containsKey("items") || propSchema.containsKey("allOf")
+                || propSchema.containsKey("oneOf") || propSchema.containsKey("anyOf")) {
+            return true;
+        }
+        if (Boolean.FALSE.equals(propSchema.get("readOnly"))) {
+            return true;
+        }
+        Map<String, Object> nested = Util.asStringObjectMap(propSchema.get("properties"));
+        return nested != null && !nested.isEmpty() && overlayPropertiesAreSemantic(nested);
     }
 
     /**
