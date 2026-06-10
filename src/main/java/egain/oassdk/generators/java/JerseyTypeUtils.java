@@ -69,6 +69,11 @@ public final class JerseyTypeUtils {
             return "Object";
         }
 
+        String componentSchemaName = JerseySchemaUtils.findComponentSchemaName(schema, ctx.spec);
+        if (componentSchemaName != null) {
+            return JerseyNamingUtils.toJavaClassName(componentSchemaName);
+        }
+
         // When allOf has exactly one ref branch (e.g. L10NString + enum constraints), use that ref's type
         if (schema.containsKey("allOf")) {
             List<Map<String, Object>> allOfSchemas = Util.asStringObjectMapList(schema.get("allOf"));
@@ -93,7 +98,8 @@ public final class JerseyTypeUtils {
                         }
                     }
                 }
-                if (refCount == 1 && singleRefSchemaName != null) {
+                if (refCount == 1 && singleRefSchemaName != null
+                        && !JerseySchemaUtils.allOfHasPropertyOverlayBranches(allOfSchemas)) {
                     return JerseyNamingUtils.toJavaClassName(singleRefSchemaName);
                 }
             }
@@ -297,6 +303,10 @@ public final class JerseyTypeUtils {
      * Compute the Java field type for a property (same logic as in generateModel field loop).
      */
     String computeFieldTypeForProperty(String fieldName, Map<String, Object> fieldSchema, boolean isArrayType, Map<String, Object> spec) {
+        String componentType = JerseySchemaUtils.findComponentSchemaName(fieldSchema, spec);
+        if (componentType != null) {
+            return JerseyNamingUtils.toJavaClassName(componentType);
+        }
         if (isArrayType && "items".equals(fieldName)) {
             String itemType = null;
             if (fieldSchema != null) {
