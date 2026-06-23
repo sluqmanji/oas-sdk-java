@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.Base64;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
 
 /**
  * Mock data generator
@@ -566,7 +567,7 @@ public class MockDataGenerator implements TestGenerator, ConfigurableTestGenerat
         }
         String bound = json.replaceAll(
                 "\"parent\"\\s*:\\s*\\{[^}]*\"id\"\\s*:\\s*\"[^\"]*\"",
-                "\"parent\":{\"id\":\"${test.parent.folder.id}\"}");
+                Matcher.quoteReplacement("\"parent\":{\"id\":\"${test.parent.folder.id}\"}"));
         if (!bound.contains("\"name\"")) {
             bound = bound.replaceFirst("\\{", "{\"name\":\"SDK-mock-folder\",");
         }
